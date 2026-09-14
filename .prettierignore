@@ -1,0 +1,9 @@
+node_modules
+.next
+dist
+pnpm-lock.yaml
+drizzle/meta
+docs/architecture/diagrams
+.diagrams
+playwright-report
+test-results

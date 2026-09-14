@@ -1,0 +1,7 @@
+# Three apps and three packages, in one workspace. ADR-002 argues the monorepo;
+# the short version is that packages/contracts only buys anything if the frontend,
+# the backend and the runner all resolve the same copy of it.
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "e2e"
