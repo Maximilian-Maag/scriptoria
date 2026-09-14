@@ -1,0 +1,63 @@
+# Loaded before 01-groups.ldif — the groups below reference these DNs, so the
+# order of the file names is load-bearing.
+#
+# The directory fixture stands in for the domain controller. It is seeded with
+# four accounts because the authorisation rules need four distinct shapes to be
+# provable (FA-02, FA-01.4):
+#
+#   platform.root   in the admin group            → sees administration
+#   admin.branch    in two area groups            → sees exactly those two areas
+#   admin.datacenter     in one area group             → sees one area
+#   admin.none  in no group at all            → authenticates, sees an empty screen
+#
+# The password is the same for all four and is a fixture password. Nothing
+# outside the dev stack accepts it.
+#   password: Passw0rd!
+
+dn: dc=scriptoria,dc=test
+objectClass: dcObject
+objectClass: organization
+dc: scriptoria
+o: Scriptoria Test Directory
+
+dn: ou=users,dc=scriptoria,dc=test
+objectClass: organizationalUnit
+ou: users
+
+dn: cn=platform.root,ou=users,dc=scriptoria,dc=test
+objectClass: inetOrgPerson
+cn: platform.root
+sn: Admin
+uid: platform.root
+displayName: Platform Root Account
+mail: platform.root@scriptoria.test
+userPassword: Passw0rd!
+
+dn: cn=admin.branch,ou=users,dc=scriptoria,dc=test
+objectClass: inetOrgPerson
+cn: admin.branch
+sn: User
+uid: admin.branch
+displayName: Branch Network Administrator
+mail: admin.branch@scriptoria.test
+userPassword: Passw0rd!
+
+dn: cn=admin.datacenter,ou=users,dc=scriptoria,dc=test
+objectClass: inetOrgPerson
+cn: admin.datacenter
+sn: Dcn
+uid: admin.datacenter
+displayName: Data Centre Administrator
+mail: admin.datacenter@scriptoria.test
+userPassword: Passw0rd!
+
+# Authenticates successfully and belongs to nothing. FA-01.4 is only testable
+# because this account exists.
+dn: cn=admin.none,ou=users,dc=scriptoria,dc=test
+objectClass: inetOrgPerson
+cn: admin.none
+sn: Nobody
+uid: admin.none
+displayName: Unentitled Administrator
+mail: admin.none@scriptoria.test
+userPassword: Passw0rd!

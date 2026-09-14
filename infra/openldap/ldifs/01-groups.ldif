@@ -1,0 +1,30 @@
+# The groups the areas are entitled to, so the group-to-area mapping in FA-11 can
+# be exercised end to end. One group per example area, plus the root group.
+#
+# The point of this fixture is FA-01.4 as much as the happy path: admin.none
+# authenticates successfully and belongs to no mapped group, so they must land on
+# an empty screen — a valid outcome, not an error.
+
+dn: ou=groups,dc=scriptoria,dc=test
+objectClass: organizationalUnit
+ou: groups
+
+dn: cn=scriptoria-root,ou=groups,dc=scriptoria,dc=test
+objectClass: groupOfNames
+cn: scriptoria-root
+member: cn=platform.root,ou=users,dc=scriptoria,dc=test
+
+dn: cn=scriptoria-branch-network,ou=groups,dc=scriptoria,dc=test
+objectClass: groupOfNames
+cn: scriptoria-branch-network
+member: cn=admin.branch,ou=users,dc=scriptoria,dc=test
+
+dn: cn=scriptoria-firewall,ou=groups,dc=scriptoria,dc=test
+objectClass: groupOfNames
+cn: scriptoria-firewall
+member: cn=admin.branch,ou=users,dc=scriptoria,dc=test
+
+dn: cn=scriptoria-datacenter,ou=groups,dc=scriptoria,dc=test
+objectClass: groupOfNames
+cn: scriptoria-datacenter
+member: cn=admin.datacenter,ou=users,dc=scriptoria,dc=test

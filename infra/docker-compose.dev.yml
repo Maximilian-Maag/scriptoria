@@ -1,0 +1,128 @@
+# Local development — everything the three Node processes talk to, and nothing
+# they run in. The apps themselves run locally via `make run`, so a restart is a
+# restart rather than a rebuild.
+#
+# Start with: make dev          (or: docker compose -f infra/docker-compose.dev.yml up -d)
+#
+# Two of these services are stand-ins for systems that normally live outside the
+# development machine. They are what makes the interactive path testable without
+# access to the real ones, which is the whole reason the e2e suite can exist:
+#   openldap  → the directory server
+#   sshd      → the script VM, with a script directory, an output directory and a crontab
+
+services:
+
+  # ── Metadata database ─────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: scriptoria-postgres
+    environment:
+      POSTGRES_DB: scriptoria
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Creates the test and e2e databases on a FRESH volume only. An existing
+      # volume never runs these — use `make test-db` there.
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d scriptoria"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+    networks: [dev]
+
+  # ── Sessions, run streams and the job queue ───────────────────────────────────
+
+  redis:
+    image: redis:7-alpine
+    container_name: scriptoria-redis
+    # appendonly so a restart during development does not silently drop the
+    # sessions you were logged in with.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+    networks: [dev]
+
+  # ── Directory stand-in ────────────────────────────────────────────────────────
+  # Seeded with accounts and groups shaped like real directory ones, so the
+  # group-to-area mapping (FA-11) can be exercised. NFR-02 is LDAPS in production;
+  # this fixture speaks plain LDAP because a self-signed chain here would only be
+  # testing the fixture's own certificate.
+
+  openldap:
+    # `bitnami/openldap` was withdrawn from the public catalogue in 2025; the
+    # frozen copies live under `bitnamilegacy/` and are drop-in identical. A
+    # frozen image is acceptable for a fixture whose job is to answer binds in
+    # development — it is not acceptable for a real deployment, and nothing in
+    # one uses it: there the directory is the organisation's own.
+    image: bitnamilegacy/openldap:2.6
+    container_name: scriptoria-openldap
+    environment:
+      LDAP_ROOT: dc=scriptoria,dc=test
+      LDAP_ADMIN_USERNAME: admin
+      LDAP_ADMIN_PASSWORD: adminpassword
+      LDAP_CUSTOM_LDIF_DIR: /ldifs
+    ports:
+      - "1389:1389"
+    volumes:
+      - ./openldap/ldifs:/ldifs:ro
+    networks: [dev]
+
+  # ── Script VM stand-in ───────────────────────────────────────────────────────
+  # A container with sshd, a script directory, an output directory and a crontab.
+  # The runner connects to it exactly as it would to a real script VM: outbound
+  # SSH, PTY allocated, SFTP on the same connection.
+  #
+  # `make fixtures-key` generates the keypair before the first `make dev`.
+
+  sshd:
+    build: ./sshd
+    container_name: scriptoria-sshd
+    ports:
+      - "2222:22"
+    volumes:
+      # Both of these are installed into place by the entrypoint rather than
+      # mounted where they are used: sshd and cron both refuse a file that is
+      # not owned by the account it belongs to, and a bind mount carries the
+      # host user's ownership.
+      - ./sshd/authorized_keys:/opt/scriptoria/authorized_keys:ro
+      - ./sshd/crontab:/opt/scriptoria/crontab:ro
+      - ./sshd/scripts:/opt/scriptoria/scripts:ro
+      - sshd_export:/opt/scriptoria/export
+    networks: [dev]
+
+  # ── Architecture documentation ────────────────────────────────────────────────
+  # Renders docs/architecture/workspace.dsl. The model is the source of truth;
+  # this is how you look at it.
+
+  structurizr-lite:
+    # Pinned: upstream replaced the `latest` tag with a deprecation stub that
+    # exits immediately (Structurizr Lite is being sunset). This is the last
+    # working release.
+    image: structurizr/lite:2025.11.08
+    container_name: scriptoria-structurizr
+    ports:
+      - "8088:8080"   # → http://localhost:8088
+    volumes:
+      - ../docs/architecture:/usr/local/structurizr
+    networks: [dev]
+
+volumes:
+  postgres_data:
+  redis_data:
+  sshd_export:
+
+networks:
+  dev:
+    driver: bridge

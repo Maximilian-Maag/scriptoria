@@ -1,0 +1,24 @@
+# crontab of svc.scripts on this service VM — the fixture's stand-in for the real one.
+#
+# ADR-005: this file is authoritative and the platform is a guest in it. The
+# schedule service reads it, and when an admin edits a schedule it rewrites ONLY
+# the lines between the two delimiters below, leaving everything else byte-for-
+# byte intact.
+#
+# The two hand-written entries above the block are not decoration. They are the
+# test: after the platform has written a schedule, they must still be here,
+# unchanged, comments and spacing included. A read-modify-write that reformats a
+# crontab is a read-modify-write that will one day drop someone's job.
+
+MAILTO=""
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# hand-written, predates the platform — must survive every write
+17 3 * * * /opt/scriptoria/scripts/inventory-report.sh >> /opt/scriptoria/export/cron-inventory.log 2>&1
+
+# hand-written, deliberately oddly spaced — must survive byte-for-byte
+30   4   *   *   1    /usr/bin/find /opt/scriptoria/export -type f -mtime +30 -delete
+
+# >>> scriptoria managed — do not edit inside this block by hand >>>
+0 2 * * * /opt/scriptoria/scripts/inventory-report.sh >> /opt/scriptoria/export/cron-inventory.log 2>&1
+# <<< scriptoria managed <<<
