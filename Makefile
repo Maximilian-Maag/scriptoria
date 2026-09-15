@@ -38,7 +38,7 @@ help:
 	@echo "  diagrams              render the C4 diagrams from docs/architecture/workspace.dsl (PNG + PDF)"
 	@echo "  diagrams-png          render PNG only"
 	@echo "  diagrams-pdf          render one vector PDF of the C4 diagrams in reading order"
-	@echo "  diagrams-clean        remove generated diagrams (pinned jars are kept)"
+	@echo "  diagrams-clean        remove generated diagrams (the pinned renderer images are kept)"
 	@echo "  fixtures-key          generate the dev SSH keypair the runner uses against the sshd fixture"
 	@echo "  clean                 remove build artifacts"
 
@@ -141,6 +141,9 @@ fixtures-key:
 	@cp infra/sshd/keys/id_ed25519.pub infra/sshd/authorized_keys
 	@echo "Dev runner key in infra/sshd/keys — restart the stack to pick it up"
 
+# Pulls the two pinned renderer images. Separate from `diagrams` because it is
+# the only step that needs the network — once they are local, rendering is
+# offline, which the target environment requires (NFR-01).
 diagrams-install:
 	@node_modules/.bin/tsx scripts/diagramTools.ts
 
@@ -148,6 +151,12 @@ diagrams-install:
 # of truth. Both formats by default: --png writes line art (JPEG's block artefacts
 # would land on the glyph edges), --pdf writes ONE vector PDF of the C4 diagrams
 # in reading order.
+#
+# structurizr-cli and PlantUML run in pinned containers, so rendering the
+# architecture needs no JRE on the host — docker is already required for the dev
+# stack, a Java toolchain would be a second prerequisite installed for nothing
+# but pictures. Everything written here is gitignored: the DSL is what is
+# reviewed, never a checked-in render of it.
 diagrams: diagrams-install
 	@node_modules/.bin/tsx scripts/diagrams.ts --png --pdf
 
@@ -158,8 +167,9 @@ diagrams-pdf: diagrams-install
 	@node_modules/.bin/tsx scripts/diagrams.ts --pdf
 
 diagrams-clean:
-	@rm -rf docs/architecture/diagrams .diagrams/puml
-	@echo "Removed generated diagrams (the pinned jars in .diagrams/ are kept)"
+	@rm -rf docs/architecture/diagrams .diagrams
+	@echo "Removed the generated diagrams and their PlantUML intermediates."
+	@echo "The pinned renderer images are kept — 'docker image rm' them by hand if you want the space."
 
 clean:
 	rm -rf apps/frontend/.next apps/backend/.next apps/runner/dist packages/*/dist

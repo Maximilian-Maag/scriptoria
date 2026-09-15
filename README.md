@@ -130,7 +130,7 @@ scriptoria/
 │   ├── openldap/               # Seeded test accounts and groups
 │   └── deploy/                 # (planned) reverse proxy config and systemd units
 ├── e2e/                        # (planned) Playwright — the interactive dialogue flow
-├── scripts/                    # (planned) diagrams.ts, diagramTools.ts
+├── scripts/                    # diagrams.ts, diagramTools.ts — render the C4 model
 └── Makefile                    # The entry point for everything — `make help`
 ```
 
@@ -167,11 +167,15 @@ access to the real ones, which is what the e2e suite runs against.
 
 ## Architecture Diagrams
 
-`docs/architecture/workspace.dsl` is the source of truth, and it is validated with the
-Structurizr CLI. `make diagrams` will render it to PNG and to one vector PDF in reading order;
-the output is gitignored, because a diagram checked in next to the model it came from is a
-diagram that will disagree with it. The render scripts are not written yet — for now the model
-is viewed through Structurizr Lite at <http://localhost:8088>.
+`docs/architecture/workspace.dsl` is the source of truth. `make diagrams` renders it to one
+PNG per view and to a single vector PDF in reading order; the output is gitignored, because a
+diagram checked in next to the model it came from is a diagram that will disagree with it.
+
+Both renderers — the Structurizr CLI and PlantUML — run in pinned containers, so rendering the
+architecture needs docker but no JRE on the host. `make diagrams-install` pulls them and is the
+only step that touches the network; after that the render works offline, which the target
+environment requires (NFR-01). To read the model rather than export it, Structurizr Lite serves
+it at <http://localhost:8088> once `make dev` is up.
 
 Descriptions in the model are deliberately short — a box carrying a paragraph is a box nobody
 reads. The reasoning lives in the ADRs, and the view descriptions link to them.

@@ -258,6 +258,12 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
         # `autoLayout` takes a direction and then rank and node separation in
         # pixels. The defaults (300, 300) pack these graphs tightly enough that
         # the edge labels overlap the boxes, so both are raised.
+        #
+        # These figures lay out Structurizr Lite at :8088. They do NOT reach the
+        # exported PNGs and PDF: the PlantUML exporter divides them by 5 and 10
+        # respectively, which is far too tight for a picture nobody can pan, so
+        # scripts/diagrams.ts overrides the separation on the way out. Tune these
+        # for Lite; tune the constants in that script for the rendered files.
 
         systemcontext scriptoria "SystemContext" {
             include *
@@ -277,10 +283,30 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
             description "Every REST call leaves through the API proxy. The terminal WebSocket is the one exception and is authorised on upgrade (ADR-007)."
         }
 
-        component backend "Component_Backend" {
-            include *
-            autoLayout lr 450 250
-            description "Routes are thin shells over services; services return Result<T>; only the repository layer speaks SQL. The stream gateway is the exception — ADR-007."
+        # The control plane is split across three component views on purpose. One
+        # view of all 21 components carried 47 relationships, and every edge
+        # crossed every other: technically complete, unreadable in practice.
+        # Each view below answers one question, and a component that serves two
+        # of them appears in both.
+
+        component backend "Component_Backend_Requests" {
+            include frontend api_auth api_areas api_catalog api_runs api_results api_schedules api_docs
+            include svc_auth svc_areas svc_catalog svc_runs svc_results svc_schedules lib_result
+            autoLayout lr 400 300
+            description "The delegation spine. Every route is a thin shell: validate, call exactly one service, map the Result<T> to a response. No route reaches the database, and no route holds domain logic."
+        }
+
+        component backend "Component_Backend_Auth" {
+            include frontend api_auth api_stream svc_auth svc_authz svc_audit lib_session directory broker
+            autoLayout lr 400 300
+            description "Who the caller is, and what they may see. The bind is made with the caller's own credentials, entitlements are rebuilt from the directory at every login (NFR-03), and the session itself is opaque and server-side. The terminal upgrade is authorised the same way — ADR-007."
+        }
+
+        component backend "Component_Backend_Data" {
+            include svc_areas svc_authz svc_catalog svc_runs svc_results svc_schedules svc_audit api_audit api_health
+            include frontend lib_repo lib_session database broker logs monitoring
+            autoLayout lr 400 300
+            description "Everything that outlives a request. Only the repository layer speaks SQL, every service records through the audit service, and an audit write can never fail the operation it records."
         }
 
         component runner "Component_Runner" {
