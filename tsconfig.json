@@ -1,7 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    // scripts/ is run by tsx and never emitted, so the imports name the .ts
+    // files they actually resolve to rather than a .js that is never built.
+    "allowImportingTsExtensions": true
   },
   "include": ["scripts/**/*.ts"]
 }
