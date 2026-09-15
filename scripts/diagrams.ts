@@ -61,8 +61,10 @@ const READING_ORDER = [
   "Component_Backend_Auth",
   "Component_Backend_Data",
   "Component_Runner",
-  "Deployment_Development",
+  "Deployment_Local",
+  "Deployment_Staging",
   "Deployment_Production",
+  "Deployment_Portability",
 ] as const;
 
 function run(command: string, args: readonly string[], what: string): string {
