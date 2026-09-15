@@ -208,7 +208,7 @@ In descending priority.
 
 | ID | Requirement |
 |---|---|
-| NFR-01 | **Isolated environment.** The platform runs inside a restricted network segment with no internet access at runtime and no external identity provider. Every dependency installs from an internal mirror. |
+| NFR-01 | **Isolated environment.** The platform runs inside one private network per environment. The reverse proxy holds the only public address; the control plane, the runner, the data stores, the script VM and the directory are reachable only from within it. No external identity provider. Dependencies are vendored into the build rather than fetched at deploy time, so bringing an environment up does not depend on reaching a registry. |
 | NFR-02 | Authentication against the **local directory over LDAP/LDAPS**. No SSO, no cloud identity provider. Login deliberately uses a separate account from everyday work. |
 | NFR-03 | Authorisation **exclusively through groups**, never through individual accounts. Session entitlements are cleared and rebuilt at **every** login. The system is never authoritative for groups. |
 | NFR-04 | Directory groups are **referenced, not synchronised**. No locally maintained account or group inventory. |

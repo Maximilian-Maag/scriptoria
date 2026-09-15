@@ -185,8 +185,13 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
         run_scanner -> script_vm "Lists the script directory, reads the headers" "SFTP"
         run_cron -> script_vm "Reads and writes the crontab" "SSH"
 
-        # ── Deployment, local development ─────────────────────────────────────────
-        deploymentEnvironment "Development" {
+        # ── Deployment, local ─────────────────────────────────────────────────────
+        # Not Terraform's business and never will be: this is the docker-compose
+        # stack on a workstation, and the two fixtures are what make the
+        # interactive path testable without access to a real script VM or a real
+        # directory. Named "Local" rather than "Dev" since Dev is now a
+        # provisioned environment.
+        deploymentEnvironment "Local" {
             deploymentNode "Developer Workstation" "The script VM is a container with sshd and the reference scripts." "Linux / Containers" {
                 deploymentNode "frontend" "Dev server on :3000" "Node" {
                     containerInstance frontend
@@ -212,44 +217,188 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
             }
         }
 
-        # ── Deployment, production ────────────────────────────────────────────────
-        deploymentEnvironment "Production" {
-            deploymentNode "Isolated Network Segment" "No internet at runtime and no external identity provider (NFR-01)." "Linux" {
-                deploymentNode "web" "" "Linux VM / rootless containers" {
-                    deploymentNode "reverse proxy" "TLS termination and the routing split between frontend and control plane." "systemd / nginx" {
+        # ── Deployment, provisioned environments ──────────────────────────────────
+        # Staging and Production are the same five instances from the same
+        # Terraform modules, differing only in size and process count. That
+        # sameness is the point: staging is worth having only while it is shaped
+        # like production, and a module that takes a different path per
+        # environment stops proving anything.
+        #
+        # Dev is smaller on purpose — one VM carries the proxy, the frontend, the
+        # control plane, both stores and the directory. It buys a place to run the
+        # thing, not evidence about how it behaves under load.
+        #
+        # The runner is its own instance in all three. It is the only component
+        # holding SSH keys and the only one that reaches the script VM, so the
+        # boundary is drawn where the credentials are. The frontend, by contrast,
+        # is a renderer holding no credentials of its own, and separating it from
+        # the control plane inside the same VPC, behind the same proxy, would buy
+        # a boundary nothing enforces while putting a cross-host hop on every call
+        # the API proxy makes.
+        #
+        # Process counts are processes on one host. They survive a process dying,
+        # not the host dying, and the labels say so rather than implying an
+        # availability property this shape does not have. Real HA would need a
+        # second app instance behind the balancer — a cost decision, not a drawing
+        # decision.
+        #
+        # Dev is modelled but deliberately not drawn: its sizing is in the
+        # README's environment table, and a third picture would add a page
+        # without adding a fact.
+        #
+        # Everything sits inside one private VPC per environment, including the
+        # script VM and the directory. The reverse proxy is the only thing with a
+        # public address — see NFR-01, which this arrangement rewrites rather than
+        # abandons.
+
+        deploymentEnvironment "Dev" {
+            deploymentNode "Linode" "One region, one VPC." "Linode" {
+                deploymentNode "VPC scriptoria-dev" "Private. The proxy holds the only public address; everything else is reachable only from inside it (NFR-01)." "Linode VPC / Firewall" {
+                    deploymentNode "scriptoria" "One VM for the platform: proxy, frontend and control plane, with the stores and the directory beside them. Everything that is separate in production, together." "Linode Instance / rootless containers" {
+                        deploymentNode "reverse proxy" "TLS termination and the routing split between the frontend and the control plane." "systemd / nginx" {
+                        }
+                        deploymentNode "frontend" "Standalone build; the target machine never runs an install." "Node" {
+                            containerInstance frontend
+                        }
+                        deploymentNode "backend" "One process. Enough to exercise the code paths, not enough to say anything about availability." "Node · 1 process" {
+                            containerInstance backend
+                        }
+                        deploymentNode "postgres" "" "PostgreSQL" {
+                            containerInstance database
+                        }
+                        deploymentNode "redis" "" "Redis" {
+                            containerInstance broker
+                        }
+                        deploymentNode "openldap" "Seeded with the same account shapes as the local fixture." "OpenLDAP" {
+                            softwareSystemInstance directory
+                        }
                     }
-                    deploymentNode "frontend" "Standalone build; the target machine never runs an install." "Node" {
-                        containerInstance frontend
+                    deploymentNode "runner" "Its own VM even here, because it is the only thing holding SSH keys and the only thing that reaches the script VM. Collapsing it into the platform VM would make dev the one environment where that boundary does not exist." "Linode Instance / rootless containers" {
+                        deploymentNode "runner" "One process, so O-7's concurrency question stays untested here." "Node · 1 process" {
+                            containerInstance runner
+                        }
                     }
-                }
-                deploymentNode "app" "" "Linux VM / rootless containers" {
-                    deploymentNode "backend" "n replicas, stateless. A replica can be replaced mid-run." "Node" {
-                        containerInstance backend
+                    deploymentNode "script" "Provisioned, then left alone. The platform installs nothing here (NFR-07)." "Linode Instance" {
+                        softwareSystemInstance script_vm
                     }
-                    deploymentNode "runner" "m replicas. Holds the SSH keys; its own release cycle." "Node" {
-                        containerInstance runner
-                    }
-                }
-                deploymentNode "data" "" "Linux VM" {
-                    deploymentNode "postgres" "" "PostgreSQL" {
-                        containerInstance database
-                    }
-                    deploymentNode "redis" "" "Redis" {
-                        containerInstance broker
-                    }
-                }
-                deploymentNode "Script VM" "One instance is the normal case; more are possible. Nothing is installed here and no port is opened." "Linux VM" {
-                    softwareSystemInstance script_vm
                 }
             }
-            deploymentNode "Directory Server" "" "LDAP" {
-                softwareSystemInstance directory
+        }
+
+        deploymentEnvironment "Staging" {
+            deploymentNode "Linode" "Same region and module versions as production." "Linode" {
+                deploymentNode "VPC scriptoria-staging" "Private. The proxy holds the only public address; everything else is reachable only from inside it (NFR-01)." "Linode VPC / Firewall" {
+                    deploymentNode "app" "" "Linode Instance / rootless containers" {
+                        deploymentNode "reverse proxy" "TLS termination and the routing split between the frontend and the control plane. The terminal WebSocket goes straight through to the backend." "systemd / nginx" {
+                        }
+                        deploymentNode "frontend" "Standalone build; the target machine never runs an install." "Node" {
+                            containerInstance frontend
+                        }
+                        deploymentNode "backend" "Stateless. A process can be replaced mid-run without dropping a PTY, because no process holds one — the runner does." "Node · 2 processes" 2 {
+                            containerInstance backend
+                        }
+                    }
+                    deploymentNode "runner" "Its own instance. It is the only thing holding SSH keys and the only thing that reaches the script VM, so the boundary sits where the credentials are rather than around a frontend that holds none." "Linode Instance / rootless containers" {
+                        deploymentNode "runner" "Holds the SSH keys and the PTYs. Its own release cycle." "Node · 2 processes" 2 {
+                            containerInstance runner
+                        }
+                    }
+                    deploymentNode "data" "" "Linode Instance" {
+                        deploymentNode "postgres" "" "PostgreSQL" {
+                            containerInstance database
+                        }
+                        deploymentNode "redis" "" "Redis" {
+                            containerInstance broker
+                        }
+                    }
+                    deploymentNode "script" "A real script VM with real scripts on it — the one thing the fixture cannot stand in for (O-6)." "Linode Instance" {
+                        softwareSystemInstance script_vm
+                    }
+                    deploymentNode "ldap" "" "Linode Instance / OpenLDAP" {
+                        softwareSystemInstance directory
+                    }
+                }
             }
-            deploymentNode "Monitoring" "" "On-premise" {
+            deploymentNode "Monitoring" "" "External" {
                 softwareSystemInstance monitoring
             }
-            deploymentNode "Log Platform" "" "On-premise" {
+            deploymentNode "Log Platform" "" "External" {
                 softwareSystemInstance logs
+            }
+        }
+
+        deploymentEnvironment "Production" {
+            deploymentNode "Linode" "" "Linode" {
+                deploymentNode "VPC scriptoria-prod" "Private. The proxy holds the only public address; everything else is reachable only from inside it (NFR-01)." "Linode VPC / Firewall" {
+                    deploymentNode "app" "" "Linode Instance / rootless containers" {
+                        deploymentNode "reverse proxy" "TLS termination and the routing split between the frontend and the control plane. The terminal WebSocket goes straight through to the backend." "systemd / nginx" {
+                        }
+                        deploymentNode "frontend" "Standalone build; the target machine never runs an install." "Node" {
+                            containerInstance frontend
+                        }
+                        deploymentNode "backend" "Stateless. A process can be replaced mid-run without dropping a PTY, because no process holds one — the runner does." "Node · 3 processes" 3 {
+                            containerInstance backend
+                        }
+                    }
+                    deploymentNode "runner" "Its own instance. It is the only thing holding SSH keys and the only thing that reaches the script VM, so the boundary sits where the credentials are rather than around a frontend that holds none." "Linode Instance / rootless containers" {
+                        deploymentNode "runner" "Holds the SSH keys and the PTYs. Its own release cycle." "Node · 2 processes" 2 {
+                            containerInstance runner
+                        }
+                    }
+                    deploymentNode "data" "Backed up. The audit trail lives here and is the one thing that cannot be rebuilt." "Linode Instance" {
+                        deploymentNode "postgres" "" "PostgreSQL" {
+                            containerInstance database
+                        }
+                        deploymentNode "redis" "" "Redis" {
+                            containerInstance broker
+                        }
+                    }
+                    deploymentNode "script" "One instance is the normal case; more are possible (NFR-07). Nothing is installed here and no port is opened to the internet." "Linode Instance" {
+                        softwareSystemInstance script_vm
+                    }
+                    deploymentNode "ldap" "Authoritative for every account and group (NFR-03, NFR-04)." "Linode Instance / OpenLDAP" {
+                        softwareSystemInstance directory
+                    }
+                }
+            }
+            deploymentNode "Monitoring" "" "External" {
+                softwareSystemInstance monitoring
+            }
+            deploymentNode "Log Platform" "" "External" {
+                softwareSystemInstance logs
+            }
+        }
+
+        # ── Deployment, module portability ────────────────────────────────────────
+        # Not an environment anybody deploys. It is the contract the per-provider
+        # module implementations satisfy, drawn once so the portability claim can
+        # be checked rather than asserted.
+        #
+        # Only the Linode implementation is deployed. The other three exist so the
+        # interface stays honest: an interface with one implementation is just the
+        # implementation with extra steps, and the first real port is where you
+        # find out which assumptions were Linode's rather than the platform's.
+        deploymentEnvironment "Portability" {
+            deploymentNode "modules/network" "One private network per environment, with the public address as the only way in." "linode VPC+Firewall · aws VPC+SG · azure VNet+NSG · gcp VPC+Firewall" {
+                deploymentNode "modules/edge" "The public address and TLS. Holds no application — everything it fronts runs in modules/app." "linode NodeBalancer · aws ALB · azure AppGateway · gcp HTTPS-LB" {
+                }
+                deploymentNode "modules/app" "The proxy, the frontend and the control plane on one instance. The module whose process counts differ between environments." "linode Instance · aws EC2+ASG · azure VMSS · gcp MIG" {
+                    containerInstance frontend
+                    containerInstance backend
+                }
+                deploymentNode "modules/runner" "Its own instance everywhere, because it is the only module that holds SSH keys and the only one that reaches the script VM." "linode Instance · aws EC2+ASG · azure VMSS · gcp MIG" {
+                    containerInstance runner
+                }
+                deploymentNode "modules/data" "Where the portability claim is thinnest: every provider has managed Postgres and Redis, and no two agree on how to configure them." "linode ManagedDB · aws RDS+ElastiCache · azure FlexServer+Cache · gcp CloudSQL+Memorystore" {
+                    containerInstance database
+                    containerInstance broker
+                }
+                deploymentNode "modules/script" "The one node no provider abstraction helps with, and the one that needs none. The platform installs nothing here (NFR-07)." "a plain Linux VM, identical on all four" {
+                    softwareSystemInstance script_vm
+                }
+                deploymentNode "modules/directory" "Deliberately not a managed identity service: NFR-02 rules out an external identity provider, which removes the one place each cloud would differ most." "a plain VM running OpenLDAP, all four" {
+                    softwareSystemInstance directory
+                }
             }
         }
     }
@@ -315,16 +464,28 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
             description "Everything above the execution driver is written against the ExecutionTarget interface, so replacing SSH stays a local change (ADR-001)."
         }
 
-        deployment scriptoria "Development" "Deployment_Development" {
+        deployment scriptoria "Local" "Deployment_Local" {
             include *
             autoLayout tb 400 400
-            description "The sshd and OpenLDAP fixtures stand in for the script VM and the directory, so the whole interactive path is testable locally."
+            description "The sshd and OpenLDAP fixtures stand in for the script VM and the directory, so the whole interactive path is testable locally. Nothing here is provisioned by Terraform."
+        }
+
+        deployment scriptoria "Staging" "Deployment_Staging" {
+            include *
+            autoLayout tb 400 400
+            description "Production's shape at a smaller size, from the same modules at the same versions. Two backend replicas and two runners, because one of each cannot exercise replacing a replica mid-run or routing stdin to the worker that holds the PTY."
         }
 
         deployment scriptoria "Production" "Deployment_Production" {
             include *
             autoLayout tb 400 400
-            description "Every connection to the script VM is outbound. Nothing is installed there and no port is opened, so its existing hardening stands unchanged."
+            description "Every connection to the script VM is outbound and stays inside the VPC. Nothing is installed there and no port is opened to the internet, so its hardening stands unchanged."
+        }
+
+        deployment scriptoria "Portability" "Deployment_Portability" {
+            include *
+            autoLayout tb 400 400
+            description "The contract each provider implementation satisfies, not an environment anybody deploys. Only the Linode implementation runs; the other three keep the interface honest, since an interface with one implementation is the implementation with extra steps."
         }
 
         styles {

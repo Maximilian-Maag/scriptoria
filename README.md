@@ -32,7 +32,7 @@ The decisions behind it: [`docs/architecture/adr/`](docs/architecture/adr/).
 | Sessions, streams, job queue | Redis 7 |
 | Directory | LDAP / LDAPS (`ldapts`) |
 | Package manager | pnpm workspaces |
-| Deployment | Rootless containers under systemd, behind a reverse proxy with TLS |
+| Deployment | Terraform per environment — rootless containers under systemd on Linode, behind a reverse proxy with TLS |
 
 Both web tiers are Next.js, as NFR-11 requires; [ADR-002](docs/architecture/adr/002-one-typescript-monorepo.md)
 argues that against the obvious split-stack alternative and states what it costs. The terminal
@@ -128,7 +128,8 @@ scriptoria/
 │   ├── docker-compose.dev.yml  # Postgres, Redis, OpenLDAP, sshd fixture, Structurizr Lite
 │   ├── sshd/                   # The stand-in script VM: reference scripts, output dir, crontab
 │   ├── openldap/               # Seeded test accounts and groups
-│   └── deploy/                 # (planned) reverse proxy config and systemd units
+│   ├── deploy/                 # (planned) reverse proxy config and systemd units
+│   └── terraform/              # (planned) dev, staging and prod from shared modules
 ├── e2e/                        # (planned) Playwright — the interactive dialogue flow
 ├── scripts/                    # diagrams.ts, diagramTools.ts — render the C4 model
 └── Makefile                    # The entry point for everything — `make help`
@@ -179,6 +180,36 @@ it at <http://localhost:8088> once `make dev` is up.
 
 Descriptions in the model are deliberately short — a box carrying a paragraph is a box nobody
 reads. The reasoning lives in the ADRs, and the view descriptions link to them.
+
+## Environments
+
+| Environment | Provisioned by | Shape |
+|---|---|---|
+| Local | docker-compose | The workstation stack, with the sshd and OpenLDAP fixtures standing in for the script VM and the directory. Terraform never touches it. |
+| Dev | Terraform | Three VMs: one carries the proxy, frontend, control plane, Postgres, Redis and the directory; the runner and the script VM get their own. Deployed like the rest, deliberately not drawn — see below. |
+| Staging | Terraform | Production's shape from the same modules at the same versions — five instances, two backend processes, two runner processes. |
+| Production | Terraform | Five instances — app, runner, data, script, directory. Backed up: the audit trail lives here and is the one thing that cannot be rebuilt. |
+
+Each provisioned environment is one private Linode VPC, and the reverse proxy holds the only
+public address (NFR-01). The runner is its own instance in all three, because it is the only
+component holding SSH keys and the only one that reaches the script VM — the boundary is drawn
+where the credentials are. The frontend is deliberately not separated from the control plane: it
+is a renderer holding no credentials of its own, and splitting it inside the same VPC behind the
+same proxy would buy a boundary nothing enforces, while putting a cross-host hop on every call
+the API proxy makes.
+
+Process counts are processes on one host. They survive a process dying, not the host dying, and
+the diagrams say so rather than implying otherwise — real availability would need a second app
+instance behind the balancer. Staging is worth having only while it stays production's shape,
+which is why it is five instances and not a cheaper arrangement. Only staging and production get
+a deployment view: dev's shape is in the table above, and a third picture would cost a page
+without carrying a fact.
+
+Only the Linode implementation is deployed. The modules are written against a provider-agnostic
+interface with AWS, Azure and GCP implementations beside it — `Deployment_Portability` draws
+that contract and what each provider supplies for it. The interface exists to stay honest: one
+with a single implementation is that implementation with extra steps, and the first real port is
+where you learn which assumptions were Linode's rather than the platform's.
 
 ## Open Decisions
 
