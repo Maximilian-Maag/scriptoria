@@ -54,6 +54,7 @@ yet.
 Full requirements: [`docs/requirements/requirements.md`](docs/requirements/requirements.md).
 The architecture model: [`docs/architecture/workspace.dsl`](docs/architecture/workspace.dsl).
 The decisions behind it: [`docs/architecture/adr/`](docs/architecture/adr/).
+How the branches and CI work: [`docs/guides/branching-and-ci.md`](docs/guides/branching-and-ci.md).
 
 ## Technology Stack
 
@@ -155,11 +156,16 @@ scriptoria/
 │   ├── core/                   # Pure domain logic: authorization, header parsing, cron, exec
 │   ├── db/                     # The only package that speaks SQL — schema, repos, migrations
 │   └── config/                 # Zod-validated environment loading
+├── .github/
+│   ├── workflows/ci.yml        # Type-check, lint, test, build — on pull requests
+│   └── actions/setup/          # Node, pnpm and a warm store cache, in one place
 ├── docs/
 │   ├── architecture/
 │   │   ├── workspace.dsl       # Structurizr DSL — the architecture source of truth
 │   │   ├── adr/                # Architecture decision records
 │   │   └── diagrams/           # Generated, gitignored — `make diagrams`
+│   ├── guides/
+│   │   └── branching-and-ci.md # The three branches and what runs before a merge
 │   └── requirements/
 │       └── requirements.md     # FA-xx / NFR-xx, referenced from the model and the code
 ├── infra/
@@ -212,6 +218,36 @@ The dev stack includes an **sshd fixture** — a container with a script directo
 directory and a crontab — standing in for the script VM, and an **OpenLDAP fixture** standing in
 for the directory server. Together they make the entire interactive path testable without
 access to the real ones, which is what the e2e suite runs against.
+
+## Contributing
+
+Three long-lived branches, one direction of travel:
+
+```
+topic branch ──PR──▶ dev ──PR──▶ staging ──PR──▶ main
+```
+
+`dev` is the default branch and where topic branches start and end. `staging` is
+what is being validated; `main` is what is released. Nothing skips a step — the
+three merges take minutes, and landing on `main` directly is how `main` and
+`dev` start disagreeing about what is in a release.
+
+Branches are named `<kind>/<slug>` — `feat/`, `fix/`, `docs/`, `ci/`,
+`refactor/`, `test/` — one topic each.
+
+Before a pull request, run what CI runs:
+
+```bash
+make type-check         # every workspace package
+make lint
+make test
+make build
+```
+
+All four go through the Makefile precisely so that CI and your machine cannot
+disagree about what they mean. The full picture, including why `Test` is an
+aggregating job and why the build needs no environment, is in
+[`docs/guides/branching-and-ci.md`](docs/guides/branching-and-ci.md).
 
 ## Architecture Diagrams
 
