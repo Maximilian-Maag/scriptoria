@@ -40,7 +40,14 @@ case rather than a convenience, because one run writes hundreds of files across 
 sites; its entries are fetched one at a time, so an 800-file archive never puts 800 requests
 on the runner's queue at once.
 
-What is *not* built yet: recurring jobs (FA-10), the audit view and the OpenAPI document. The first UI draft is deliberately a throwaway iteration and is meant to
+**Recurring scripts are up** (build order §5, the last functional epic). The crontab on each
+script VM stays authoritative and the platform runs no scheduler — it reads the file, writes
+back only the block between its own delimiters, and derives *next run* from the expression on
+every read, so a schedule changed over SSH is picked up without anyone telling the platform.
+Lines written by hand are shown and deliberately not editable.
+
+What is *not* built yet: the audit view (FA-12 is recorded in full but has no screen) and the
+OpenAPI document. The first UI draft is deliberately a throwaway iteration and is meant to
 be rebuilt once it has been seen (NFR-14). Directories marked *(planned)* below do not exist
 yet.
 
