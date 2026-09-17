@@ -7,3 +7,4 @@ export * from "./result";
 export * from "./schedule";
 export * from "./audit";
 export * from "./stream";
+export * from "./queue";

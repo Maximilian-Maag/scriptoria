@@ -11,10 +11,15 @@ network device, a firewall or a hypervisor itself. The scripts do, with their ow
 
 ## Status
 
-Early. The architecture model, the requirements, the shared packages and the control plane's
-authentication path are built and tested; the frontend, the runner and the remaining backend
-routes are not yet. The `Project Structure` section below describes the intended layout, not
-what is on disk today — directories marked *(planned)* do not exist yet.
+The **walking skeleton is up**: a directory login, the reference area, a script catalog read
+off the script VM, a live bidirectional terminal, a staged abort and a result download — the
+whole path, end to end, against the dev fixtures. That closes the four risky assumptions build
+order §1 names: the LDAP bind, SSH/PTY interactivity, stream latency and SFTP result access.
+
+What is *not* built yet is most of the product around it: area administration (FA-11), the
+result ZIP (FA-09.3), recurring jobs (FA-10), the audit view and the OpenAPI document. The
+first UI draft is deliberately a throwaway iteration and is meant to be rebuilt once it has
+been seen (NFR-14). Directories marked *(planned)* below do not exist yet.
 
 Full requirements: [`docs/requirements/requirements.md`](docs/requirements/requirements.md).
 The architecture model: [`docs/architecture/workspace.dsl`](docs/architecture/workspace.dsl).
@@ -91,7 +96,7 @@ The script owner is a role in the domain but not a user of the platform. That is
 ```
 scriptoria/
 ├── apps/
-│   ├── frontend/               # (planned) Next.js 15 UI + API proxy (port 3000)
+│   ├── frontend/               # Next.js 15 UI + API proxy (port 3000)
 │   │   └── src/
 │   │       ├── app/            # App Router: login, areas, catalog, console, results, admin
 │   │       │   └── api/proxy/  # The browser's only REST route to the backend
@@ -100,22 +105,25 @@ scriptoria/
 │   │           └── api/        # Typed client built on packages/contracts
 │   ├── backend/                # Next.js 15 API app + terminal WebSocket (port 3001)
 │   │   ├── server.ts           # Custom entrypoint: Next.js handler + ws upgrade (ADR-007)
-│   │   ├── drizzle/            # Generated migrations
 │   │   └── src/
 │   │       ├── app/api/        # Thin route handlers: validate → service → toResponse
 │   │       └── lib/
 │   │           ├── services/   # All domain logic, returns Result<T>
-│   │           ├── db/         # Drizzle client, schema, repository layer
 │   │           ├── auth/       # LDAP bind, group resolution, server-side sessions
+│   │           ├── runner/     # Asks the runner to read the script VM (queue, not HTTP)
 │   │           └── stream/     # Stream gateway: Redis stream ⇄ WebSocket
-│   └── runner/                 # (planned) SSH/PTY worker — no port, deliberately not Next.js
+│   └── runner/                 # SSH/PTY worker — no port, deliberately not Next.js
 │       └── src/
-│           ├── driver/         # ExecutionTarget interface (see ADR-001)
-│           ├── ssh/            # ssh2 connection, PTY session, staged abort, SFTP
-│           └── stream/         # Redis stream publisher, stdin subscriber
+│           ├── driver/         # ExecutionTarget interface (ADR-001) and its ssh2 target
+│           ├── ssh/            # Key material and host key pinning
+│           ├── queue/          # Claims one run per slot off the queue
+│           ├── rpc/            # Answers the control plane's reads of the script VM
+│           ├── run/            # Run lifecycle, staged abort, transcript, collection
+│           └── stream/         # Redis stream publisher, stdin and control subscriber
 ├── packages/
 │   ├── contracts/              # Zod schemas + inferred types, shared by all three apps
-│   ├── core/                   # Pure domain logic: authorization rules, header parsing, cron
+│   ├── core/                   # Pure domain logic: authorization, header parsing, cron, exec
+│   ├── db/                     # The only package that speaks SQL — schema, repos, migrations
 │   └── config/                 # Zod-validated environment loading
 ├── docs/
 │   ├── architecture/
@@ -142,9 +150,13 @@ cp .env.example .env    # every value already matches the dev stack
 make install            # workspace dependencies
 make fixtures-key       # dev SSH keypair for the sshd fixture
 make dev                # postgres, redis, openldap, sshd fixture, structurizr
-make db-push db-seed    # schema and the reference area
+make db-migrate db-seed # schema and the reference area
 make run                # frontend :3000, backend :3001, runner
 ```
+
+`make db-push` exists but currently fails against this schema: drizzle-kit cannot introspect
+the expression index on `area_entitlements` (`lower(directory_group)`). `make db-migrate` is
+the working path and the one the deployment uses anyway.
 
 `.env` is worth copying rather than skipping: the schema defaults in `packages/config` are the
 production-shaped ones — TLS verification on, `Secure` cookies — and the example file is what

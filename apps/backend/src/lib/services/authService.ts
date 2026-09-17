@@ -8,8 +8,7 @@ import {
   updateSessionAreas,
   type Session,
 } from "../auth/session";
-import { listEntitlements, listRootGroups } from "../db/repositories/areaRepository";
-import * as audit from "../db/repositories/auditRepository";
+import { areaRepository, auditRepository as audit } from "@scriptoria/db";
 import { ok, type Result } from "../result";
 
 /**
@@ -47,7 +46,7 @@ export async function login(
   }
 
   const directoryUser = authenticated.value;
-  const [entitlements, rootGroups] = await Promise.all([listEntitlements(), listRootGroups()]);
+  const [entitlements, rootGroups] = await Promise.all([areaRepository.listEntitlements(), areaRepository.listRootGroups()]);
 
   const areaIds = resolveAreaIds(directoryUser.groups, entitlements);
   const role = isRoot(directoryUser.groups, rootGroups) ? "root" : "administrator";
@@ -104,7 +103,7 @@ export function toSessionUser(session: Session): SessionUser {
  * what changed.
  */
 export async function refreshSessionEntitlements(session: Session): Promise<string[]> {
-  const entitlements = await listEntitlements();
+  const entitlements = await areaRepository.listEntitlements();
   const areaIds = resolveAreaIds(session.groups, entitlements);
   await updateSessionAreas(session.id, areaIds);
   return areaIds;
