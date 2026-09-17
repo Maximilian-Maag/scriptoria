@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.3.4",
     "@scriptoria/config": "workspace:*",
     "@scriptoria/contracts": "workspace:*",
     "@scriptoria/core": "workspace:*",
@@ -31,6 +32,7 @@
     "@types/archiver": "^6.0.3",
     "@types/react": "^19.0.4",
     "@types/ws": "^8.5.13",
+    "openapi3-ts": "^4.6.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"

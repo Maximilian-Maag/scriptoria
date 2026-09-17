@@ -9,6 +9,7 @@ import type {
   CreateGroupEntitlementRequest,
   CreateScriptSourceRequest,
   LoginRequest,
+  Paginated,
   ResultList,
   ResultPreview,
   Run,
@@ -32,21 +33,9 @@ import type {
  * the control plane. Nothing here knows the backend's address.
  */
 
-/** What `GET /runs` answers with: one page of runs, and how big the whole is. */
-export interface RunList {
-  items: Run[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-/** FA-12. One page of the audit log, and how big the whole is. */
-export interface AuditPage {
-  items: AuditEntry[];
-  total: number;
-  limit: number;
-  offset: number;
-}
+/** One page, and how big the whole is. The shape both list endpoints answer with. */
+export type RunList = Paginated<Run>;
+export type AuditPage = Paginated<AuditEntry>;
 
 export class ApiFailure extends Error {
   constructor(

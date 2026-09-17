@@ -4,8 +4,8 @@ export default function ControlPlanePage() {
       <h1>Scriptoria — Control Plane</h1>
       <p>
         This is the API tier. Every privileged operation lives here: authentication against the
-        directory, authorisation against the area mapping, the run lifecycle, results, schedules
-        and the audit trail.
+        directory, authorisation against the area mapping, the run lifecycle, results, schedules and
+        the audit trail.
       </p>
       <p>
         The user interface is a separate application. The terminal WebSocket is mounted on this
@@ -17,7 +17,11 @@ export default function ControlPlanePage() {
           <a href="/api/health">/api/health</a> — liveness and dependency checks
         </li>
         <li>
-          <a href="/api/docs">/api/docs</a> — the REST contract
+          <a href="/api/docs">/api/docs</a> — the REST contract, to read
+        </li>
+        <li>
+          <a href="/api/openapi.json">/api/openapi.json</a> — the same contract, to generate a
+          client from
         </li>
       </ul>
     </main>

@@ -52,9 +52,16 @@ filtered by account, action, area and time window. It is root's alone: an admini
 the areas, scripts, runs and results their groups reach (FA-02.4), and who did what across the
 platform is a different question. Reading the log is deliberately not itself audited.
 
-What is *not* built yet: the OpenAPI document. The first UI draft is deliberately a throwaway
-iteration and is meant to be rebuilt once it has been seen (NFR-14). Directories marked
-*(planned)* below do not exist yet.
+**The REST contract is published** — `/api/openapi.json`, and `/api/docs` to read it. It is
+generated from the Zod schemas in `packages/contracts` that the routes already validate with,
+so a field that does not exist in the contract cannot appear in the document. That is the
+promise [ADR-002](docs/architecture/adr/002-one-typescript-monorepo.md) makes for the monorepo,
+and it is why there is no hand-written API document to drift. The page is rendered server-side
+rather than by Swagger UI: NFR-01 puts this platform in a network with no route out, and a page
+that fetches its own renderer from a CDN is blank in exactly the environment it runs in.
+
+The first UI draft is deliberately a throwaway iteration and is meant to be rebuilt once it has
+been seen (NFR-14). Directories marked *(planned)* below do not exist yet.
 
 Full requirements: [`docs/requirements/requirements.md`](docs/requirements/requirements.md).
 The architecture model: [`docs/architecture/workspace.dsl`](docs/architecture/workspace.dsl).

@@ -1,5 +1,6 @@
 import type {
   AbortRunRequest,
+  Paginated,
   Run,
   RunEvent,
   RunListQuery,
@@ -103,7 +104,7 @@ export async function getRun(session: Session, runId: string): Promise<Result<Ru
 export async function listRuns(
   session: Session,
   filter: RunListQuery,
-): Promise<Result<{ items: Run[]; total: number; limit: number; offset: number }>> {
+): Promise<Result<Paginated<Run>>> {
   const { items, total } = await runRepository.listRuns(session.areaIds, filter);
   const reaped = await Promise.all(items.map((run) => reapIfOrphaned(run)));
   return ok({ items: reaped, total, limit: filter.limit, offset: filter.offset });

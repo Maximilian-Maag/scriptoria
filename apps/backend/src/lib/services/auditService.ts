@@ -1,4 +1,4 @@
-import type { AuditEntry, AuditQuery } from "@scriptoria/contracts";
+import type { AuditEntry, AuditQuery, Paginated } from "@scriptoria/contracts";
 import { auditRepository } from "@scriptoria/db";
 import { ok, type Result } from "../result";
 
@@ -18,9 +18,7 @@ import { ok, type Result } from "../result";
  * of an audit trail is that it says what happened rather than what a later
  * version of this code thinks happened.
  */
-export async function queryAuditLog(
-  filter: AuditQuery,
-): Promise<Result<{ items: AuditEntry[]; total: number; limit: number; offset: number }>> {
+export async function queryAuditLog(filter: AuditQuery): Promise<Result<Paginated<AuditEntry>>> {
   const { items, total } = await auditRepository.query(filter);
   return ok({ items, total, limit: filter.limit, offset: filter.offset });
 }
