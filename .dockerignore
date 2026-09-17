@@ -1,0 +1,33 @@
+# What the build context must not carry. Not a tidiness measure: the host's
+# node_modules is a pnpm tree full of absolute symlinks into a store that does
+# not exist in the image, so copying it in produces a build that resolves to
+# nothing. The images install their own.
+#
+# Patterns are deliberately not root-anchored, for the same reason .gitignore's
+# are not: this is a workspace, and node_modules and .next exist under apps/*
+# and packages/* as well as at the root.
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Never in an image. .env.example is the tracked template and stays.
+.env
+.env*.local
+
+# The dev SSH keypair the runner presents to the sshd fixture, and the fixture
+# itself. Neither belongs in a production image.
+infra/sshd/keys/
+infra/terraform/
+
+.git/
+.github/
+coverage/
+playwright-report/
+test-results/
+.vitest/
+docs/
+e2e/
+*.md

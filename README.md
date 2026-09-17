@@ -209,7 +209,7 @@ the working path and the one the deployment uses anyway.
 On a database whose schema arrived by some route other than `db-migrate`, the migration
 journal is empty while the tables already exist, and `make db-migrate` then fails re-creating
 the enums. It is a first-run mismatch rather than a schema problem: drop the database volume
-(`make dev-down && docker volume rm infra_postgres_data`) and migrate into it clean.
+(`make dev-down && docker volume rm scriptoria_postgres_data`) and migrate into it clean.
 
 `.env` is worth copying rather than skipping: the schema defaults in `packages/config` are the
 production-shaped ones — TLS verification on, `Secure` cookies — and the example file is what
@@ -224,7 +224,7 @@ The seeded directory accounts all use the password `Passw0rd!`:
 | `admin.datacenter` | `scriptoria-datacenter` | An administrator entitled to one area |
 | `admin.none` | — | FA-01.4: authenticates successfully and sees nothing |
 
-The architecture model renders at <http://localhost:8088> once `make dev` is up.
+The architecture model renders at <http://localhost:8089> once `make dev` is up.
 
 The dev stack includes an **sshd fixture** — a container with a script directory, an output
 directory and a crontab — standing in for the script VM, and an **OpenLDAP fixture** standing in
@@ -271,7 +271,7 @@ Both renderers — the Structurizr CLI and PlantUML — run in pinned containers
 architecture needs docker but no JRE on the host. `make diagrams-install` pulls them and is the
 only step that touches the network; after that the render works offline, which the target
 environment requires (NFR-01). To read the model rather than export it, Structurizr Lite serves
-it at <http://localhost:8088> once `make dev` is up.
+it at <http://localhost:8089> once `make dev` is up.
 
 Descriptions in the model are deliberately short — a box carrying a paragraph is a box nobody
 reads. The reasoning lives in the ADRs, and the view descriptions link to them.
@@ -299,6 +299,30 @@ instance behind the balancer. Staging is worth having only while it stays produc
 which is why it is five instances and not a cheaper arrangement. Only staging and production get
 a deployment view: dev's shape is in the table above, and a third picture would cost a page
 without carrying a fact.
+
+### Container images
+
+Three images, one per process — `make docker-build`, or one at a time. Each is built from the
+workspace root rather than from its own directory: a pnpm workspace app depends on sibling
+packages and on one lockfile that describes all of them.
+
+Each image installs two dependency trees and ships one. The build needs the dev dependencies,
+the runtime must not carry them, and `pnpm install --prod` over an existing tree adds to it
+rather than thinning it — so the production tree is resolved once from a clean base and the
+build's tree never leaves the builder. All three run as `node` and are meant to run rootless
+(NFR-05). Nothing is fetched when a container starts: NFR-01 puts this in a network with no
+route out, so everything is in the image.
+
+One argument is not optional in a real deployment:
+
+```bash
+make docker-build-frontend TERMINAL_WS_URL=wss://scriptoria.example/terminal
+```
+
+`NEXT_PUBLIC_*` is compiled into the client bundle by `next build` and is *not* read from the
+container's environment, so the terminal's WebSocket address is a property of the image. Left
+at its default, the bundle keeps pointing at `ws://localhost:3001` and the terminal — the
+product's critical path — silently fails to connect, with nothing in any log to say why.
 
 Only the Linode implementation is deployed. The modules are written against a provider-agnostic
 interface with AWS, Azure and GCP implementations beside it — `Deployment_Portability` draws
