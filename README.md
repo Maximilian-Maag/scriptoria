@@ -202,6 +202,10 @@ make db-migrate db-seed # schema and the reference area
 make run                # frontend :3000, backend :3001, runner
 ```
 
+The backend's own suite needs Postgres running (`make dev`) and creates its own database —
+one per working directory, named `scriptoria_test_<hash>`, so two checkouts cannot truncate
+each other's tables. `make test-db-prune` drops them.
+
 ### Running the end-to-end suite
 
 ```bash

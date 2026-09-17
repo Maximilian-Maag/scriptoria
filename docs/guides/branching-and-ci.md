@@ -49,7 +49,7 @@ protections are what make that safe — not the workflow file.
 | Check | What it does | Why it is its own job |
 |---|---|---|
 | **Type-check & Lint** | `make type-check`, `make lint` | Both halves share an install and take seconds. Splitting them would double the setup cost to parallelise ninety seconds. |
-| **Test** | One leg per package: `@scriptoria/*`, runner, backend, frontend | A slow suite stops being every suite's problem, and a red frontend does not hide a red runner. |
+| **Test** | One leg per package: `@scriptoria/*`, runner, frontend — and the backend in its own job, with a Postgres service | A slow suite stops being every suite's problem, and a red frontend does not hide a red runner. The backend is separate because it is the only one needing a service: its authorisation tests run against a real database, since the bug worth catching is a `where` clause that stopped filtering. |
 | **Build** | `make build` | Catches what type-checking cannot: both web tiers are Next.js applications whose routes are collected and compiled at build time. |
 | **Architecture model** | `make diagrams-png`, only when the model changed | `workspace.dsl` is the source of truth and its renders are gitignored, so nothing else would notice a model that stopped parsing. |
 | **End-to-end** | `make dev`, then `make test-e2e` | The only check that exercises the product as a person meets it — a browser, a real LDAP bind, a real PTY, real files back over SFTP. Everything above it can be green while the platform does nothing. |

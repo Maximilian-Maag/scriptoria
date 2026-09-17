@@ -78,6 +78,14 @@ const SESSION = registry.registerComponent("securitySchemes", "sessionCookie", {
 
 const secured = [{ [SESSION.name]: [] }];
 
+/**
+ * Reads the session when there is one and answers perfectly well when there is
+ * not — the empty alternative is how OpenAPI says that. Two routes are like
+ * this and both on purpose: signing out is idempotent, and asking who is signed
+ * in has `nobody` as a valid answer rather than as a refusal.
+ */
+const optional = [{ [SESSION.name]: [] }, {}];
+
 // ── Components ───────────────────────────────────────────────────────────────
 
 const ref = <T extends z.ZodTypeAny>(name: string, schema: T) => registry.register(name, schema);
@@ -194,7 +202,7 @@ registry.registerPath({
   tags: ["Authentication"],
   summary: "Sign out",
   description: "Deletes the server-side session and clears the cookie. Idempotent.",
-  security: secured,
+  security: optional,
   responses: { 204: { description: "Signed out, whether or not there was a session" } },
 });
 
@@ -206,7 +214,7 @@ registry.registerPath({
   summary: "Who is signed in",
   description:
     "The account, its role and the areas its groups reach right now. Re-read rather than remembered, because an entitlement can be revoked mid-session (NFR-03).",
-  security: secured,
+  security: optional,
   responses: {
     200: json("The session, or `user: null` when there is none", SessionResponse),
   },

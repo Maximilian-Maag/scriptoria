@@ -25,7 +25,7 @@ help:
 	@echo "  build                 build all workspace packages"
 	@echo "  lint                  lint all apps and packages"
 	@echo "  type-check            TypeScript type-check everything"
-	@echo "  test                  run unit and integration tests"
+	@echo "  test                  run unit and integration tests (the backend leg needs the dev stack)"
 	@echo "  test-e2e              run the Playwright end-to-end suite (requires a live stack)"
 	@echo "  test-db               create the test and e2e databases in the running Postgres"
 	@echo "  test-db-prune         drop the per-directory test databases"
