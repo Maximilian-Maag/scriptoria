@@ -33,8 +33,14 @@ name for a modifying script (FA-08.3). The run history that makes a finished run
 again came with it: without it a closed tab lost the run, and with it the results FA-09.5
 wants kept visible for a run that *failed*.
 
-What is *not* built yet: the result ZIP (FA-09.3), recurring jobs (FA-10), the audit view and
-the OpenAPI document. The first UI draft is deliberately a throwaway iteration and is meant to
+**Result provisioning is complete** (build order §4). FA-09 names three forms — display, copy,
+download — and all three are there: a preview that reads a result on screen and puts it on the
+clipboard, a single streamed download, and the result set as one ZIP. The ZIP is the normal
+case rather than a convenience, because one run writes hundreds of files across dozens of
+sites; its entries are fetched one at a time, so an 800-file archive never puts 800 requests
+on the runner's queue at once.
+
+What is *not* built yet: recurring jobs (FA-10), the audit view and the OpenAPI document. The first UI draft is deliberately a throwaway iteration and is meant to
 be rebuilt once it has been seen (NFR-14). Directories marked *(planned)* below do not exist
 yet.
 
