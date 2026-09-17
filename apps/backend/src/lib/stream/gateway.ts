@@ -5,6 +5,7 @@ import type Redis from "ioredis";
 import {
   clientMessageSchema,
   isTerminalStatus,
+  type RunControl,
   type ServerMessage,
   type StreamHello,
 } from "@scriptoria/contracts";
@@ -12,7 +13,7 @@ import { canAccessArea, decodeTerminalFrame, encodeTerminalFrame } from "@script
 import { loadBackendConfig } from "@scriptoria/config";
 import { readSession } from "../auth/session";
 import { keys, redis, redisSubscriber } from "../redis";
-import { findRunById } from "../db/repositories/runRepository";
+import { runRepository } from "@scriptoria/db";
 
 /**
  * The terminal WebSocket (ADR-006, ADR-007).
@@ -57,6 +58,13 @@ export function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Bu
   if (url.pathname !== TERMINAL_PATH) return false;
 
   wss.handleUpgrade(request, socket, head, (ws) => {
+    // Nothing is listening for messages yet — authorising the session is a
+    // round trip to Redis, and a client that sends its hello frame the instant
+    // the socket opens would have it dropped on the floor. Paused here and
+    // resumed once each listener is in place, so no frame is ever lost between
+    // the handshake and the stream.
+    ws.pause();
+
     void serve(ws, request).catch((cause) => {
       console.error("terminal gateway failed", cause);
       close(ws, { type: "end", reason: "server_shutdown", message: "The stream ended" });
@@ -81,7 +89,7 @@ async function serve(socket: WebSocket, request: IncomingMessage): Promise<void>
     return;
   }
 
-  const run = await findRunById(hello.runId);
+  const run = await runRepository.findRunById(hello.runId);
   // Deliberately the same answer for a run that does not exist and a run in an
   // area this session is not entitled to. A distinguishable 403 would turn the
   // terminal endpoint into a way to enumerate other departments' runs.
@@ -109,15 +117,23 @@ async function serve(socket: WebSocket, request: IncomingMessage): Promise<void>
 
   send(socket, { type: "ready", runId: run.id, status: run.status, replayGap });
 
-  const stdin = wireStdin(socket, run.id);
+  const client = wireClient(socket, run.id);
+  socket.resume();
+
   try {
     await pump(socket, streamKey, cursor, run.id);
   } finally {
-    stdin.disconnect();
+    client.disconnect();
   }
 }
 
-/** Waits for the hello frame, and only the hello frame, before doing anything. */
+/**
+ * Waits for the hello frame, and only the hello frame, before doing anything.
+ *
+ * The socket is resumed once this listener exists and paused again as soon as
+ * the hello has been read, so the keystrokes an eager client sends next are
+ * still waiting when the stdin route is wired up.
+ */
 function firstMessage(socket: WebSocket): Promise<StreamHello | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => finish(null), 10_000);
@@ -134,30 +150,56 @@ function firstMessage(socket: WebSocket): Promise<StreamHello | null> {
     const finish = (value: StreamHello | null): void => {
       clearTimeout(timer);
       socket.off("message", onMessage);
+      socket.pause();
       resolve(value);
     };
 
     socket.on("message", onMessage);
     socket.once("close", () => finish(null));
+    socket.resume();
   });
 }
 
 /**
- * Keystrokes travel on a Redis channel keyed by run id, so they reach the one
- * worker holding this PTY wherever it happens to be running.
+ * Everything the client sends after the hello frame.
+ *
+ * Keystrokes and control messages travel on two Redis channels keyed by run id,
+ * so they reach the one worker holding this PTY wherever it happens to be
+ * running. They are two channels because they are two kinds of thing: stdin is
+ * opaque bytes that must not be parsed, resize is structured JSON that must be.
  */
-function wireStdin(socket: WebSocket, runId: string): { disconnect: () => void } {
+function wireClient(socket: WebSocket, runId: string): { disconnect: () => void } {
   const commands = redis();
-  const channel = keys.runStdin(runId);
+  const stdinChannel = keys.runStdin(runId);
+  const controlChannel = keys.runControl(runId);
 
   const onMessage = (raw: unknown, isBinary: boolean): void => {
-    if (!isBinary) return; // Control messages are handled elsewhere; resize lands here later.
+    if (isBinary) {
+      try {
+        const { data } = decodeTerminalFrame(new Uint8Array(raw as ArrayBufferLike));
+        if (data.length > 0) void commands.publish(stdinChannel, Buffer.from(data));
+      } catch {
+        // A malformed frame is a client bug. Dropping it is right: the
+        // alternative is tearing down a live terminal over one bad keystroke.
+      }
+      return;
+    }
+
+    // The PTY was allocated at the size the client reported at start time. When
+    // the window changes, the script's own idea of the terminal has to change
+    // with it, or a script that formats a table formats it for the wrong width.
     try {
-      const { data } = decodeTerminalFrame(new Uint8Array(raw as ArrayBufferLike));
-      if (data.length > 0) void commands.publish(channel, Buffer.from(data));
+      const parsed = clientMessageSchema.safeParse(JSON.parse(String(raw)));
+      if (!parsed.success || parsed.data.type !== "resize") return;
+      const message: RunControl = {
+        type: "resize",
+        cols: parsed.data.cols,
+        rows: parsed.data.rows,
+      };
+      void commands.publish(controlChannel, JSON.stringify(message));
     } catch {
-      // A malformed frame is a client bug. Dropping it is right: the alternative
-      // is tearing down a live terminal over one bad keystroke.
+      // Same reasoning as above: a client that sends nonsense is not a reason
+      // to end a run somebody is watching.
     }
   };
 
@@ -206,7 +248,7 @@ async function pump(
 
       // No new bytes within the block. That is normal for a script waiting on a
       // prompt, so it is only a reason to stop if the run is actually over.
-      const run = await findRunById(runId);
+      const run = await runRepository.findRunById(runId);
       if (!run) break;
       if (isTerminalStatus(run.status)) {
         send(socket, {

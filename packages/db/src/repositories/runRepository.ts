@@ -83,10 +83,44 @@ export async function listRuns(
       .orderBy(desc(schema.runs.queuedAt))
       .limit(filter.limit)
       .offset(filter.offset),
-    db().select({ total: sql<number>`count(*)::int` }).from(schema.runs).where(where),
+    db()
+      .select({ total: sql<number>`count(*)::int` })
+      .from(schema.runs)
+      .where(where),
   ]);
 
   return { items: rows.map(toRun), total: counted?.total ?? 0 };
+}
+
+/**
+ * FA-10.2 — *last successful* per script, for the recurring-scripts overview.
+ *
+ * Reduced to "last successful" on purpose (O-1). The platform does not see a
+ * cron-started run happen — ADR-005 keeps the crontab authoritative and runs no
+ * scheduler — so this answers only for runs the platform itself started.
+ * Rebuilding failure telemetry here would be a second, worse copy of the
+ * monitoring that already watches the crontab (NFR-16).
+ *
+ * One grouped query rather than one per schedule: a script VM's crontab can
+ * hold dozens of lines and this renders a single page.
+ */
+export async function lastSuccessfulByScript(
+  scriptIds: readonly string[],
+): Promise<Map<string, Date>> {
+  if (scriptIds.length === 0) return new Map();
+
+  const rows = await db()
+    .select({
+      scriptId: schema.runs.scriptId,
+      at: sql<Date>`max(${schema.runs.finishedAt})`,
+    })
+    .from(schema.runs)
+    .where(and(inArray(schema.runs.scriptId, [...scriptIds]), eq(schema.runs.status, "succeeded")))
+    .groupBy(schema.runs.scriptId);
+
+  return new Map(
+    rows.filter((row) => row.at !== null).map((row) => [row.scriptId, new Date(row.at)]),
+  );
 }
 
 /**
@@ -121,14 +155,20 @@ export async function transition(
   return rows.length > 0;
 }
 
-export async function recordAbortRequest(
-  id: string,
-  requestedBy: string,
-): Promise<void> {
+export async function recordAbortRequest(id: string, requestedBy: string): Promise<void> {
   await db()
     .update(schema.runs)
     .set({ abortRequestedBy: requestedBy, abortRequestedAt: new Date() })
     .where(eq(schema.runs.id, id));
+}
+
+/**
+ * Set by the collector once the output directory has been listed. Separate from
+ * `transition` on purpose: the count says what the run left behind, and must
+ * not be able to move the run to a different state on its way in.
+ */
+export async function setResultCount(id: string, count: number): Promise<void> {
+  await db().update(schema.runs).set({ resultCount: count }).where(eq(schema.runs.id, id));
 }
 
 export async function appendEvent(

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineConfig, intFromEnv, boolFromEnv, nonEmpty } from "./load";
 import { sharedSchema } from "./shared";
 import { redisSchema } from "./redis";
+import { databaseSchema } from "./database";
 
 const ldapSchema = z.object({
   /**
@@ -58,18 +59,13 @@ const sessionSchema = z.object({
 
 export const backendSchema = sharedSchema
   .merge(redisSchema)
+  .merge(databaseSchema)
   .merge(ldapSchema)
   .merge(sessionSchema)
   .extend({
     BACKEND_PORT: intFromEnv({ min: 1, max: 65_535 }).default(3001),
     /** Where the frontend's proxy and the browser's WebSocket both arrive. */
     BACKEND_PUBLIC_ORIGIN: z.string().url().default("http://localhost:3001"),
-
-    DATABASE_URL: z
-      .string()
-      .url()
-      .default("postgres://postgres:postgres@localhost:5432/scriptoria"),
-    DATABASE_POOL_MAX: intFromEnv({ min: 1 }).default(10),
 
     /**
      * Script metadata is read off the script VM and cached (ADR-004). Short,

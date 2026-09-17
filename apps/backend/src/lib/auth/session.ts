@@ -135,6 +135,49 @@ export async function updateSessionAreas(id: string, areaIds: string[]): Promise
   );
 }
 
+/**
+ * Every live session, as stored. The input to NFR-03's administrative sweep:
+ * an admin changed a mapping, and the sessions that resolved their areas
+ * against the old one have to be re-resolved against the new.
+ *
+ * Deliberately *not* built on `readSession`. That function slides the idle
+ * window, and a sweep triggered by one administrator editing an area must not
+ * silently keep every other operator's session alive. This reads without
+ * touching a TTL.
+ *
+ * `SCAN` rather than `KEYS` because `KEYS` blocks the server for the length of
+ * the keyspace, and this runs on an interactive request.
+ */
+export async function scanSessions(): Promise<{ id: string; data: SessionData }[]> {
+  const prefix = keys.session("");
+  const client = redis();
+  const sessions: { id: string; data: SessionData }[] = [];
+
+  let cursor = "0";
+  do {
+    const [next, batch] = await client.scan(cursor, "MATCH", keys.sessionScan, "COUNT", 200);
+    cursor = next;
+    if (batch.length === 0) continue;
+
+    // One round trip per batch. A session that expired between the scan and
+    // this read comes back null, which is not a problem worth reporting: it is
+    // gone, and gone sessions are exactly what the sweep does not need to fix.
+    const raws = await client.mget(batch);
+    for (const [index, raw] of raws.entries()) {
+      if (!raw) continue;
+      const key = batch[index]!;
+      try {
+        sessions.push({ id: key.slice(prefix.length), data: JSON.parse(raw) as SessionData });
+      } catch {
+        // A session that will not parse cannot be re-entitled. `readSession`
+        // destroys these when their owner next appears; the sweep steps over it.
+      }
+    }
+  } while (cursor !== "0");
+
+  return sessions;
+}
+
 export async function destroySession(id: string): Promise<void> {
   await redis().del(keys.session(id));
 }

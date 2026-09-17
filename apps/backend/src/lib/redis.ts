@@ -1,5 +1,6 @@
 import Redis from "ioredis";
 import { loadBackendConfig } from "@scriptoria/config";
+import { redisKeys } from "@scriptoria/contracts";
 
 /**
  * Redis does three unrelated jobs here — sessions, the per-run terminal streams
@@ -24,10 +25,20 @@ export function redis(): Redis {
   return commands;
 }
 
-/** A fresh connection, for anything that will enter subscriber mode. */
-export function redisSubscriber(): Redis {
+/**
+ * A fresh connection, for anything that will block: subscriber mode, `XREAD` on
+ * a run's stream, or a `BLPOP` waiting for the runner to answer.
+ *
+ * `maxRetriesPerRequest: null` because a blocking read that has been waiting
+ * quietly for a minute is working, not stuck, and must not be failed by a retry
+ * counter.
+ */
+export function blockingConnection(): Redis {
   return new Redis(loadBackendConfig().REDIS_URL, { maxRetriesPerRequest: null });
 }
+
+/** The gateway's name for the same thing: a connection that will only listen. */
+export const redisSubscriber = blockingConnection;
 
 export async function closeRedis(): Promise<void> {
   await commands?.quit();
@@ -35,19 +46,8 @@ export async function closeRedis(): Promise<void> {
 }
 
 // ── Key layout ───────────────────────────────────────────────────────────────
-// One namespace, so a `KEYS scriptoria:*` in an incident tells an operator
-// everything this platform is holding.
+// Owned by @scriptoria/contracts, because the runner writes to half of these
+// keys and reads the other half. Two processes agreeing on a string is a
+// contract whether or not anybody writes it down.
 
-export const keys = {
-  session: (id: string) => `scriptoria:session:${id}`,
-  /** The capped stream of PTY bytes for one run (ADR-006). */
-  runStream: (runId: string) => `scriptoria:run:${runId}:stream`,
-  /** Keystrokes, published to whichever worker holds this run's PTY. */
-  runStdin: (runId: string) => `scriptoria:run:${runId}:stdin`,
-  /** Abort requests, on the same route as stdin and for the same reason. */
-  runControl: (runId: string) => `scriptoria:run:${runId}:control`,
-  /** The job queue the runner's consumer blocks on. */
-  runQueue: "scriptoria:runs:queue",
-  /** Set by the worker that claimed a run, so a second one cannot. */
-  runClaim: (runId: string) => `scriptoria:run:${runId}:claim`,
-} as const;
+export const keys = redisKeys;

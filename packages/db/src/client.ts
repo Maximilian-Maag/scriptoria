@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { loadBackendConfig } from "@scriptoria/config";
+import { loadDatabaseConfig } from "@scriptoria/config";
 import * as schema from "./schema";
 
 /**
@@ -9,6 +9,10 @@ import * as schema from "./schema";
  * Lazily because the backend is a Next.js app and its modules are imported by
  * the build as well as by the server; opening a socket at import time turns a
  * `next build` into something that needs a database.
+ *
+ * Two processes open one of these: the control plane, and the runner — which
+ * writes the run state transitions, the run events and the result records,
+ * because it is the only process that sees the PTY open and the process exit.
  */
 
 let client: postgres.Sql | undefined;
@@ -16,7 +20,7 @@ let database: ReturnType<typeof drizzle<typeof schema>> | undefined;
 
 export function db() {
   if (!database) {
-    const config = loadBackendConfig();
+    const config = loadDatabaseConfig();
     client = postgres(config.DATABASE_URL, {
       max: config.DATABASE_POOL_MAX,
       // The runner holds the long-lived connections in this system; nothing here

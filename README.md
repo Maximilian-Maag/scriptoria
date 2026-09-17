@@ -11,10 +11,45 @@ network device, a firewall or a hypervisor itself. The scripts do, with their ow
 
 ## Status
 
-Early. The architecture model, the requirements, the shared packages and the control plane's
-authentication path are built and tested; the frontend, the runner and the remaining backend
-routes are not yet. The `Project Structure` section below describes the intended layout, not
-what is on disk today — directories marked *(planned)* do not exist yet.
+The **walking skeleton is up**: a directory login, the reference area, a script catalog read
+off the script VM, a live bidirectional terminal, a staged abort and a result download — the
+whole path, end to end, against the dev fixtures. That closes the four risky assumptions build
+order §1 names: the LDAP bind, SSH/PTY interactivity, stream latency and SFTP result access.
+
+**Area administration is up** too — build order §2, and the step that stops the platform being
+functionless. The root account creates areas, maps script directories onto them and entitles
+directory groups (FA-11.1 … FA-11.5), every change is audited (FA-12.2), and a revocation
+takes effect on live sessions rather than at the next login: an administrator loses an area
+mid-session, without being signed out. That last part is what NFR-03 actually asks for, and
+it is why sessions are held server-side instead of in a token.
+
+An area that anything has ever been run in cannot be deleted — a 409, not a cascade. Run
+history outranks tidying up the configuration (FA-12.1).
+
+**Build order §3 is closed** — selection and start as two steps (FA-04.1), a start with no
+parameters in the script's own service context (FA-05.2, FA-05.3), the dialogue over the PTY
+(FA-06), the live terminal and its durable history (FA-07), and the staged abort confirmed by
+name for a modifying script (FA-08.3). The run history that makes a finished run findable
+again came with it: without it a closed tab lost the run, and with it the results FA-09.5
+wants kept visible for a run that *failed*.
+
+**Result provisioning is complete** (build order §4). FA-09 names three forms — display, copy,
+download — and all three are there: a preview that reads a result on screen and puts it on the
+clipboard, a single streamed download, and the result set as one ZIP. The ZIP is the normal
+case rather than a convenience, because one run writes hundreds of files across dozens of
+sites; its entries are fetched one at a time, so an 800-file archive never puts 800 requests
+on the runner's queue at once.
+
+**Recurring scripts are up** (build order §5, the last functional epic). The crontab on each
+script VM stays authoritative and the platform runs no scheduler — it reads the file, writes
+back only the block between its own delimiters, and derives *next run* from the expression on
+every read, so a schedule changed over SSH is picked up without anyone telling the platform.
+Lines written by hand are shown and deliberately not editable.
+
+What is *not* built yet: the audit view (FA-12 is recorded in full but has no screen) and the
+OpenAPI document. The first UI draft is deliberately a throwaway iteration and is meant to
+be rebuilt once it has been seen (NFR-14). Directories marked *(planned)* below do not exist
+yet.
 
 Full requirements: [`docs/requirements/requirements.md`](docs/requirements/requirements.md).
 The architecture model: [`docs/architecture/workspace.dsl`](docs/architecture/workspace.dsl).
@@ -32,7 +67,7 @@ The decisions behind it: [`docs/architecture/adr/`](docs/architecture/adr/).
 | Sessions, streams, job queue | Redis 7 |
 | Directory | LDAP / LDAPS (`ldapts`) |
 | Package manager | pnpm workspaces |
-| Deployment | Rootless containers under systemd, behind a reverse proxy with TLS |
+| Deployment | Terraform per environment — rootless containers under systemd on Linode, behind a reverse proxy with TLS |
 
 Both web tiers are Next.js, as NFR-11 requires; [ADR-002](docs/architecture/adr/002-one-typescript-monorepo.md)
 argues that against the obvious split-stack alternative and states what it costs. The terminal
@@ -91,7 +126,7 @@ The script owner is a role in the domain but not a user of the platform. That is
 ```
 scriptoria/
 ├── apps/
-│   ├── frontend/               # (planned) Next.js 15 UI + API proxy (port 3000)
+│   ├── frontend/               # Next.js 15 UI + API proxy (port 3000)
 │   │   └── src/
 │   │       ├── app/            # App Router: login, areas, catalog, console, results, admin
 │   │       │   └── api/proxy/  # The browser's only REST route to the backend
@@ -100,22 +135,25 @@ scriptoria/
 │   │           └── api/        # Typed client built on packages/contracts
 │   ├── backend/                # Next.js 15 API app + terminal WebSocket (port 3001)
 │   │   ├── server.ts           # Custom entrypoint: Next.js handler + ws upgrade (ADR-007)
-│   │   ├── drizzle/            # Generated migrations
 │   │   └── src/
 │   │       ├── app/api/        # Thin route handlers: validate → service → toResponse
 │   │       └── lib/
 │   │           ├── services/   # All domain logic, returns Result<T>
-│   │           ├── db/         # Drizzle client, schema, repository layer
 │   │           ├── auth/       # LDAP bind, group resolution, server-side sessions
+│   │           ├── runner/     # Asks the runner to read the script VM (queue, not HTTP)
 │   │           └── stream/     # Stream gateway: Redis stream ⇄ WebSocket
-│   └── runner/                 # (planned) SSH/PTY worker — no port, deliberately not Next.js
+│   └── runner/                 # SSH/PTY worker — no port, deliberately not Next.js
 │       └── src/
-│           ├── driver/         # ExecutionTarget interface (see ADR-001)
-│           ├── ssh/            # ssh2 connection, PTY session, staged abort, SFTP
-│           └── stream/         # Redis stream publisher, stdin subscriber
+│           ├── driver/         # ExecutionTarget interface (ADR-001) and its ssh2 target
+│           ├── ssh/            # Key material and host key pinning
+│           ├── queue/          # Claims one run per slot off the queue
+│           ├── rpc/            # Answers the control plane's reads of the script VM
+│           ├── run/            # Run lifecycle, staged abort, transcript, collection
+│           └── stream/         # Redis stream publisher, stdin and control subscriber
 ├── packages/
 │   ├── contracts/              # Zod schemas + inferred types, shared by all three apps
-│   ├── core/                   # Pure domain logic: authorization rules, header parsing, cron
+│   ├── core/                   # Pure domain logic: authorization, header parsing, cron, exec
+│   ├── db/                     # The only package that speaks SQL — schema, repos, migrations
 │   └── config/                 # Zod-validated environment loading
 ├── docs/
 │   ├── architecture/
@@ -128,7 +166,8 @@ scriptoria/
 │   ├── docker-compose.dev.yml  # Postgres, Redis, OpenLDAP, sshd fixture, Structurizr Lite
 │   ├── sshd/                   # The stand-in script VM: reference scripts, output dir, crontab
 │   ├── openldap/               # Seeded test accounts and groups
-│   └── deploy/                 # (planned) reverse proxy config and systemd units
+│   ├── deploy/                 # (planned) reverse proxy config and systemd units
+│   └── terraform/              # (planned) dev, staging and prod from shared modules
 ├── e2e/                        # (planned) Playwright — the interactive dialogue flow
 ├── scripts/                    # diagrams.ts, diagramTools.ts — render the C4 model
 └── Makefile                    # The entry point for everything — `make help`
@@ -141,9 +180,18 @@ cp .env.example .env    # every value already matches the dev stack
 make install            # workspace dependencies
 make fixtures-key       # dev SSH keypair for the sshd fixture
 make dev                # postgres, redis, openldap, sshd fixture, structurizr
-make db-push db-seed    # schema and the reference area
+make db-migrate db-seed # schema and the reference area
 make run                # frontend :3000, backend :3001, runner
 ```
+
+`make db-push` exists but currently fails against this schema: drizzle-kit cannot introspect
+the expression index on `area_entitlements` (`lower(directory_group)`). `make db-migrate` is
+the working path and the one the deployment uses anyway.
+
+On a database whose schema arrived by some route other than `db-migrate`, the migration
+journal is empty while the tables already exist, and `make db-migrate` then fails re-creating
+the enums. It is a first-run mismatch rather than a schema problem: drop the database volume
+(`make dev-down && docker volume rm infra_postgres_data`) and migrate into it clean.
 
 `.env` is worth copying rather than skipping: the schema defaults in `packages/config` are the
 production-shaped ones — TLS verification on, `Secure` cookies — and the example file is what
@@ -179,6 +227,36 @@ it at <http://localhost:8088> once `make dev` is up.
 
 Descriptions in the model are deliberately short — a box carrying a paragraph is a box nobody
 reads. The reasoning lives in the ADRs, and the view descriptions link to them.
+
+## Environments
+
+| Environment | Provisioned by | Shape |
+|---|---|---|
+| Local | docker-compose | The workstation stack, with the sshd and OpenLDAP fixtures standing in for the script VM and the directory. Terraform never touches it. |
+| Dev | Terraform | Three VMs: one carries the proxy, frontend, control plane, Postgres, Redis and the directory; the runner and the script VM get their own. Deployed like the rest, deliberately not drawn — see below. |
+| Staging | Terraform | Production's shape from the same modules at the same versions — five instances, two backend processes, two runner processes. |
+| Production | Terraform | Five instances — app, runner, data, script, directory. Backed up: the audit trail lives here and is the one thing that cannot be rebuilt. |
+
+Each provisioned environment is one private Linode VPC, and the reverse proxy holds the only
+public address (NFR-01). The runner is its own instance in all three, because it is the only
+component holding SSH keys and the only one that reaches the script VM — the boundary is drawn
+where the credentials are. The frontend is deliberately not separated from the control plane: it
+is a renderer holding no credentials of its own, and splitting it inside the same VPC behind the
+same proxy would buy a boundary nothing enforces, while putting a cross-host hop on every call
+the API proxy makes.
+
+Process counts are processes on one host. They survive a process dying, not the host dying, and
+the diagrams say so rather than implying otherwise — real availability would need a second app
+instance behind the balancer. Staging is worth having only while it stays production's shape,
+which is why it is five instances and not a cheaper arrangement. Only staging and production get
+a deployment view: dev's shape is in the table above, and a third picture would cost a page
+without carrying a fact.
+
+Only the Linode implementation is deployed. The modules are written against a provider-agnostic
+interface with AWS, Azure and GCP implementations beside it — `Deployment_Portability` draws
+that contract and what each provider supplies for it. The interface exists to stay honest: one
+with a single implementation is that implementation with extra steps, and the first real port is
+where you learn which assumptions were Linode's rather than the platform's.
 
 ## Open Decisions
 
