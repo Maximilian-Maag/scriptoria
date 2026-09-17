@@ -408,7 +408,7 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
         # pixels. The defaults (300, 300) pack these graphs tightly enough that
         # the edge labels overlap the boxes, so both are raised.
         #
-        # These figures lay out Structurizr Lite at :8088. They do NOT reach the
+        # These figures lay out Structurizr Lite at :8089. They do NOT reach the
         # exported PNGs and PDF: the PlantUML exporter divides them by 5 and 10
         # respectively, which is far too tight for a picture nobody can pan, so
         # scripts/diagrams.ts overrides the separation on the way out. Tune these
