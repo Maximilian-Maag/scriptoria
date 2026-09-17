@@ -114,3 +114,32 @@ export function abortCommand(runId: string, signal: "INT" | "TERM" | "KILL"): st
 export function cleanupCommand(runId: string): string {
   return `rm -f ${shellQuote(pidFilePath(runId))}`;
 }
+
+/**
+ * ADR-005's two crontab commands.
+ *
+ * `crontab` rather than reading `/var/spool/cron/crontabs/<user>` over SFTP,
+ * and that is not a style preference: on Debian that directory is mode 1730
+ * owned by `root:crontab`, so the service account cannot even search into it —
+ * a direct read fails with `Permission denied` while `crontab -l` succeeds,
+ * because the binary is setgid `crontab`. The supported interface to a user's
+ * crontab is the command, and going around it would mean either widening the
+ * service account's group membership or running the platform as root, both of
+ * which are worse than running one well-understood command.
+ *
+ * They are two *named* operations rather than an "exec anything" hole in the
+ * execution target. The target's vocabulary stays a closed set that the platform
+ * needs, which is what makes it reviewable (ADR-001).
+ */
+
+/** Reads the account's crontab. Exit code 1 with no output means "none yet". */
+export const CRONTAB_READ_COMMAND = "crontab -l";
+
+/**
+ * Replaces the account's crontab with whatever arrives on stdin.
+ *
+ * `crontab -` and not a temporary file: a temporary file is a second place the
+ * schedule exists, and the window between writing it and installing it is a
+ * window where a crash leaves the file behind holding somebody's schedule.
+ */
+export const CRONTAB_WRITE_COMMAND = "crontab -";

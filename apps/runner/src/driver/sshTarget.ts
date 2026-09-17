@@ -2,7 +2,13 @@ import { posix } from "node:path";
 import { Client, type ClientChannel, type FileEntryWithStats, type SFTPWrapper } from "ssh2";
 import { loadRunnerConfig } from "@scriptoria/config";
 import type { AbortStage } from "@scriptoria/contracts";
-import { abortCommand, cleanupCommand, executionCommand } from "@scriptoria/core";
+import {
+  CRONTAB_READ_COMMAND,
+  CRONTAB_WRITE_COMMAND,
+  abortCommand,
+  cleanupCommand,
+  executionCommand,
+} from "@scriptoria/core";
 import { hostKeyVerifier, loadCredentials } from "../ssh/credentials";
 import { describeError, log } from "../log";
 import type {
@@ -290,6 +296,43 @@ export class SshExecutionTarget implements ExecutionTarget {
     return { sizeBytes, truncated };
   }
 
+  /**
+   * ADR-005. `crontab -l` exits non-zero when the account has no crontab, and
+   * that is the ordinary "nothing scheduled here yet" answer rather than a
+   * failure — told apart from a real error by whether anything came back on
+   * stderr, because the exit code alone cannot distinguish them.
+   */
+  async readCrontab(): Promise<string | null> {
+    const result = await this.execCapture(CRONTAB_READ_COMMAND);
+    if (result.code === 0) return result.stdout;
+
+    if (/no crontab for/i.test(result.stderr)) return null;
+    throw new Error(
+      result.stderr.trim() === ""
+        ? `reading the crontab exited with ${result.code}`
+        : `reading the crontab failed: ${result.stderr.trim()}`,
+    );
+  }
+
+  /**
+   * The whole file, on stdin, in one write.
+   *
+   * `crontab -` replaces the crontab atomically or not at all: it parses what
+   * it is given and installs nothing if the parse fails. That is the property
+   * this depends on — a half-written crontab is a set of jobs that silently
+   * stop happening.
+   */
+  async writeCrontab(text: string): Promise<void> {
+    const result = await this.execCapture(CRONTAB_WRITE_COMMAND, text);
+    if (result.code !== 0) {
+      throw new Error(
+        result.stderr.trim() === ""
+          ? `writing the crontab exited with ${result.code}`
+          : `writing the crontab failed: ${result.stderr.trim()}`,
+      );
+    }
+  }
+
   async cleanup(runId: string): Promise<void> {
     try {
       await this.exec(cleanupCommand(runId));
@@ -323,6 +366,66 @@ export class SshExecutionTarget implements ExecutionTarget {
         stream.on("close", () => resolve(code));
         stream.resume();
         stream.stderr.resume();
+      });
+    });
+  }
+
+  /**
+   * A command whose output is the answer, optionally fed something on stdin.
+   *
+   * Separate from `exec` above, which throws its output away because a signal
+   * and an `rm` have nothing to say. A crontab is entirely what it prints, and
+   * stderr is how cron explains a refusal, so both are captured.
+   *
+   * Bounded: a crontab is a small text file and anything claiming to be a
+   * hundred megabytes of one is a symptom, not a schedule.
+   */
+  private execCapture(
+    command: string,
+    stdin?: string,
+  ): Promise<{ code: number | null; stdout: string; stderr: string }> {
+    const MAX_OUTPUT_BYTES = 1024 * 1024;
+
+    return new Promise((resolve, reject) => {
+      this.client.exec(command, (error, stream) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        const out: Buffer[] = [];
+        const errOut: Buffer[] = [];
+        let outBytes = 0;
+        let code: number | null = null;
+
+        stream.on("error", reject);
+        stream.stderr.on("error", reject);
+
+        stream.on("data", (chunk: Buffer) => {
+          outBytes += chunk.length;
+          if (outBytes > MAX_OUTPUT_BYTES) {
+            stream.destroy();
+            reject(new Error("the command produced more output than a crontab could be"));
+            return;
+          }
+          out.push(chunk);
+        });
+        stream.stderr.on("data", (chunk: Buffer) => errOut.push(chunk));
+
+        stream.on("exit", (value: number | null) => {
+          code = typeof value === "number" ? value : null;
+        });
+        stream.on("close", () => {
+          resolve({
+            code,
+            stdout: Buffer.concat(out).toString("utf8"),
+            stderr: Buffer.concat(errOut).toString("utf8"),
+          });
+        });
+
+        if (stdin !== undefined) {
+          stream.end(stdin);
+        }
       });
     });
   }

@@ -44,4 +44,18 @@ describe("scheduleId", () => {
     const command = "/opt/scriptoria/scripts/inventory-report.sh";
     expect(scheduleId("src-1", command)).not.toBe(scheduleId("src-2", command));
   });
+
+  it("separates the same command scheduled twice at different times", () => {
+    // Exactly what the fixture crontab holds: one hand-written line and one
+    // inside the managed block, running the same script at different hours.
+    // Keyed on the command alone these collide, and the interface then offers
+    // to edit one line while editing the other.
+    const command = "/opt/scriptoria/scripts/inventory-report.sh";
+    expect(scheduleId("src-1", command, 0)).not.toBe(scheduleId("src-1", command, 1));
+  });
+
+  it("still survives an edit, because an edit changes neither command nor ordinal", () => {
+    const command = "/opt/scriptoria/scripts/inventory-report.sh";
+    expect(scheduleId("src-1", command, 1)).toBe(scheduleId("src-1", command, 1));
+  });
 });

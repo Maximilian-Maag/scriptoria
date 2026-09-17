@@ -114,6 +114,26 @@ export const rpcRequestSchema = z.discriminatedUnion("kind", [
     path: remotePathSchema,
     maxBytes: z.number().int().min(1).max(1_073_741_824),
   }),
+  /** FA-10 / ADR-005: the account's crontab, which only the runner can reach. */
+  z.object({
+    kind: z.literal("readCrontab"),
+    id: uuidSchema,
+    target: sshTargetSchema,
+  }),
+  /**
+   * FA-10.4: the crontab back again, whole.
+   *
+   * The whole file rather than a diff because that is the only thing `crontab`
+   * accepts. The control plane is responsible for having preserved everything
+   * outside the managed block, and it does that with the same pure functions
+   * the tests pin the byte-for-byte property down with.
+   */
+  z.object({
+    kind: z.literal("writeCrontab"),
+    id: uuidSchema,
+    target: sshTargetSchema,
+    text: z.string().max(1_048_576),
+  }),
 ]);
 export type RpcRequest = z.infer<typeof rpcRequestSchema>;
 
@@ -150,6 +170,12 @@ export const listFilesResultSchema = z.object({
   truncated: z.boolean(),
 });
 export type ListFilesResult = z.infer<typeof listFilesResultSchema>;
+
+/** Null content means the account has no crontab yet — an ordinary state. */
+export const crontabResultSchema = z.object({
+  content: z.string().nullable(),
+});
+export type CrontabResult = z.infer<typeof crontabResultSchema>;
 
 export const readFileHeaderSchema = z.object({
   path: z.string(),
