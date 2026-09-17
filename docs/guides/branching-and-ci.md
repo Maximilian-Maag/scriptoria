@@ -52,6 +52,7 @@ protections are what make that safe — not the workflow file.
 | **Test** | One leg per package: `@scriptoria/*`, runner, backend, frontend | A slow suite stops being every suite's problem, and a red frontend does not hide a red runner. |
 | **Build** | `make build` | Catches what type-checking cannot: both web tiers are Next.js applications whose routes are collected and compiled at build time. |
 | **Architecture model** | `make diagrams-png`, only when the model changed | `workspace.dsl` is the source of truth and its renders are gitignored, so nothing else would notice a model that stopped parsing. |
+| **End-to-end** | `make dev`, then `make test-e2e` | The only check that exercises the product as a person meets it — a browser, a real LDAP bind, a real PTY, real files back over SFTP. Everything above it can be green while the platform does nothing. |
 
 Everything runs through the **Makefile**, so CI and a developer's machine run
 the same command and cannot drift into disagreeing about what "lint" means.
@@ -98,13 +99,18 @@ Plus: a pull request before merging, and branches up to date before merge.
 when the model has not changed, and a skipped check that is required blocks
 every unrelated pull request.
 
+`End-to-end` is not required either, and that one is a judgement rather than a
+mechanism: it stands up five containers, a browser and both web tiers, so it is
+the slowest check by a wide margin and the one most able to fail for reasons
+that are not the pull request's. It is worth requiring once it has a few weeks
+of history to argue from — and worth reading on every pull request meanwhile,
+because it is the only check that can tell whether the product works.
+
 ## What is not here yet
 
 There is **no CD workflow**, and that is a gap rather than a decision. The
 sibling repository releases a container image per branch — `dev`, `staging`,
-`latest` — and Scriptoria cannot yet, because `apps/*/Dockerfile` does not
-exist: `make docker-build` names three Dockerfiles and only `infra/sshd` has
-one. The Makefile targets are already written for them.
-
-There is also no e2e job. `e2e/` is still a planned directory, and a workflow
-step that runs an empty suite is a green check that means nothing.
+`latest` — and Scriptoria now could: `apps/*/Dockerfile` exists for all three
+processes and `make docker-build` builds them. What is missing is the decision
+nobody has made yet — which registry the images go to, and what credential the
+workflow uses to push them.

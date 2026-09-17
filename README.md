@@ -186,7 +186,7 @@ scriptoria/
 │   ├── openldap/               # Seeded test accounts and groups
 │   ├── deploy/                 # (planned) reverse proxy config and systemd units
 │   └── terraform/              # (planned) dev, staging and prod from shared modules
-├── e2e/                        # (planned) Playwright — the interactive dialogue flow
+├── e2e/                        # Playwright — login to run to results, in a browser
 ├── scripts/                    # diagrams.ts, diagramTools.ts — render the C4 model
 └── Makefile                    # The entry point for everything — `make help`
 ```
@@ -201,6 +201,21 @@ make dev                # postgres, redis, openldap, sshd fixture, structurizr
 make db-migrate db-seed # schema and the reference area
 make run                # frontend :3000, backend :3001, runner
 ```
+
+### Running the end-to-end suite
+
+```bash
+make dev          # the stack: postgres, redis, openldap, the sshd fixture
+make test-db      # creates scriptoria_e2e beside the dev database
+make test-e2e     # the suite
+```
+
+The suite brings up its **own** frontend, control plane and runner, on their own
+ports and against their own database. A suite pointed at `make run` would depend
+on whatever state the last session left behind, and one that wrote into the dev
+database would destroy it. What it does not stand up is the infrastructure —
+five containers per run would cost minutes to prove nothing — so `make dev` is
+the precondition, and the suite says so when it is missing.
 
 `make db-push` exists but currently fails against this schema: drizzle-kit cannot introspect
 the expression index on `area_entitlements` (`lower(directory_group)`). `make db-migrate` is

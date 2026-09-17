@@ -124,6 +124,75 @@ jobs:
       - name: Build
         run: make build
 
+  # ── End to end ───────────────────────────────────────────────────────────────
+  #
+  # The only job that exercises the product as a person meets it: a browser, a
+  # real LDAP bind, a real PTY on the script VM fixture, real files coming back
+  # over SFTP. Everything above this can be green while the platform does
+  # nothing at all.
+  #
+  # It is also the only job that needs the stack, which is why it is last and
+  # why it is one job rather than a matrix: the suite runs serially on purpose
+  # (one script VM, one run queue) and splitting it would mean standing up five
+  # containers twice to save nothing.
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      # The tracked template, which is already pointed at the compose stack.
+      # Everything the suite needs to differ — its ports and its own database —
+      # it passes as overrides, because `process.env` wins over this file.
+      - name: Configure
+        run: cp .env.example .env
+
+      # The fixture accepts this key and nothing else does: it is generated per
+      # run and never leaves the runner.
+      - name: Generate the fixture SSH key
+        run: make fixtures-key
+
+      - name: Start the stack
+        run: make dev
+
+      - name: Create the e2e database
+        run: make test-db
+
+      # Cached by version, because the browser is 130 MB and does not change
+      # between runs of the same Playwright.
+      - name: Cache the browser
+        id: browser-cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+      - name: Install the browser
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        run: pnpm --filter e2e exec playwright install --with-deps chromium
+
+      - name: Run the suite
+        run: make test-e2e
+
+      # A failed run is worth more than its exit code: the report carries the
+      # trace, the screenshot and the DOM at the moment it went wrong.
+      - name: Publish the report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
+          retention-days: 7
+
+      - name: Stop the stack
+        if: always()
+        run: make dev-down
+
   # ── Architecture model ───────────────────────────────────────────────────────
   #
   # docs/architecture/workspace.dsl is the source of truth for the architecture

@@ -20,6 +20,8 @@ next-env.d.ts
 coverage/
 playwright-report/
 test-results/
+# Where the e2e global setup records the runner it started, for the teardown.
+.playwright/
 .vitest/
 
 # local env files — .env.example IS tracked and is the documented template
