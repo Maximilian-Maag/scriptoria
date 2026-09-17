@@ -3,6 +3,8 @@ import type {
   ApiError,
   Area,
   AreaSummary,
+  AuditEntry,
+  AuditQuery,
   CreateAreaRequest,
   CreateGroupEntitlementRequest,
   CreateScriptSourceRequest,
@@ -33,6 +35,14 @@ import type {
 /** What `GET /runs` answers with: one page of runs, and how big the whole is. */
 export interface RunList {
   items: Run[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** FA-12. One page of the audit log, and how big the whole is. */
+export interface AuditPage {
+  items: AuditEntry[];
   total: number;
   limit: number;
   offset: number;
@@ -208,5 +218,18 @@ export const api = {
 
     revokeEntitlement: (areaId: string, entitlementId: string) =>
       call<Area>(`/admin/areas/${areaId}/entitlements/${entitlementId}`, { method: "DELETE" }),
+
+    /**
+     * FA-12 — what the platform recorded. Root only, like the rest of `admin`:
+     * an audit log narrowed to the reader's own entitlements would not be one.
+     */
+    audit: (query: Partial<AuditQuery> = {}) => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined && value !== "") params.set(key, String(value));
+      }
+      const search = params.toString();
+      return call<AuditPage>(`/admin/audit${search ? `?${search}` : ""}`);
+    },
   },
 };

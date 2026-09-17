@@ -46,10 +46,15 @@ back only the block between its own delimiters, and derives *next run* from the 
 every read, so a schedule changed over SSH is picked up without anyone telling the platform.
 Lines written by hand are shown and deliberately not editable.
 
-What is *not* built yet: the audit view (FA-12 is recorded in full but has no screen) and the
-OpenAPI document. The first UI draft is deliberately a throwaway iteration and is meant to
-be rebuilt once it has been seen (NFR-14). Directories marked *(planned)* below do not exist
-yet.
+**The audit log is readable** (FA-12). It was always written in full — every sign-in, run,
+download and administrative change — and now the root account can read it back on screen,
+filtered by account, action, area and time window. It is root's alone: an administrator sees
+the areas, scripts, runs and results their groups reach (FA-02.4), and who did what across the
+platform is a different question. Reading the log is deliberately not itself audited.
+
+What is *not* built yet: the OpenAPI document. The first UI draft is deliberately a throwaway
+iteration and is meant to be rebuilt once it has been seen (NFR-14). Directories marked
+*(planned)* below do not exist yet.
 
 Full requirements: [`docs/requirements/requirements.md`](docs/requirements/requirements.md).
 The architecture model: [`docs/architecture/workspace.dsl`](docs/architecture/workspace.dsl).

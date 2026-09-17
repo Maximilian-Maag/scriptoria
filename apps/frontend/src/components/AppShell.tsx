@@ -62,12 +62,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           <AreaList areas={areas.data ?? []} loading={areas.isLoading} />
         </div>
 
-        {/* FA-11. Shown only to the root account, because it is the only
+        {/* FA-11 and FA-12. Shown only to the root account, because it is the only
             account the administration routes will answer — a link that always
             leads to a 403 is worse than no link. The control plane enforces
             this independently; this is the navigation being honest, not the
             check itself. */}
-        {user.role === "root" ? <AdminLink /> : null}
+        {user.role === "root" ? <AdminLinks /> : null}
 
         <div className="border-t border-line px-5 py-3">
           <p className="truncate text-xs font-medium text-ink">{user?.displayName}</p>
@@ -87,22 +87,34 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-function AdminLink() {
+/**
+ * The two root-only screens: what the areas are (FA-11), and what has been done
+ * with them (FA-12). They sit together because they are one job — an entitlement
+ * granted and the record of granting it are read by the same person.
+ */
+const ADMIN_LINKS = [
+  { href: "/admin/areas", label: "Areas & entitlements" },
+  { href: "/admin/audit", label: "Audit log" },
+];
+
+function AdminLinks() {
   const pathname = usePathname();
-  const active = pathname.startsWith("/admin");
 
   return (
-    <div className="border-t border-line px-3 py-3">
-      <Link
-        href="/admin/areas"
-        className={`block rounded-[var(--radius-control)] px-2 py-1.5 text-[13px] ${
-          active
-            ? "bg-accent-quiet font-medium text-accent"
-            : "text-ink-muted hover:bg-surface-sunken hover:text-ink"
-        }`}
-      >
-        Areas &amp; entitlements
-      </Link>
+    <div className="space-y-0.5 border-t border-line px-3 py-3">
+      {ADMIN_LINKS.map((link) => (
+        <Link
+          key={link.href}
+          href={link.href}
+          className={`block rounded-[var(--radius-control)] px-2 py-1.5 text-[13px] ${
+            pathname.startsWith(link.href)
+              ? "bg-accent-quiet font-medium text-accent"
+              : "text-ink-muted hover:bg-surface-sunken hover:text-ink"
+          }`}
+        >
+          {link.label}
+        </Link>
+      ))}
     </div>
   );
 }
