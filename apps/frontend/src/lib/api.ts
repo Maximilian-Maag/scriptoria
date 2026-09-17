@@ -8,6 +8,7 @@ import type {
   CreateScriptSourceRequest,
   LoginRequest,
   ResultList,
+  ResultPreview,
   Run,
   RunEvent,
   RunListQuery,
@@ -121,6 +122,35 @@ export const api = {
    */
   resultFileUrl: (runId: string, path: string) =>
     `/api/proxy/runs/${runId}/results/file?path=${encodeURIComponent(path)}`,
+
+  /** FA-09.1 / FA-09.4 — content to read on screen and to copy, not to save. */
+  resultPreview: (runId: string, path: string) =>
+    call<ResultPreview>(`/runs/${runId}/results/preview?path=${encodeURIComponent(path)}`),
+
+  /**
+   * FA-09.3 — the result set as one ZIP. An empty `paths` means all of them.
+   *
+   * Fetched rather than linked, because the selection has to travel in a body.
+   * The archive is streamed to a blob and then saved: the one place in this
+   * client where a download is assembled in the tab, and it is unavoidable —
+   * a plain link cannot carry a POST body.
+   */
+  resultArchive: async (runId: string, paths: string[] = []): Promise<Blob> => {
+    const response = await fetch(`/api/proxy/runs/${runId}/results/archive`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ paths }),
+    });
+    if (!response.ok) {
+      const failure = (await response.json().catch(() => null)) as ApiError | null;
+      throw new ApiFailure(
+        response.status,
+        failure?.error.code ?? "internal",
+        failure?.error.message ?? "The archive could not be built",
+      );
+    }
+    return response.blob();
+  },
 
   /**
    * FA-11. Grouped under `admin` because these are the root account's calls and
