@@ -18,6 +18,11 @@ import { isoDateTimeSchema, remotePathSchema, uuidSchema } from "./common";
 
 export const redisKeys = {
   session: (id: string) => `scriptoria:session:${id}`,
+  /**
+   * Every session key at once, for the administrative sweep NFR-03 needs: a
+   * mapping changed, and the sessions holding the old one have to be told.
+   */
+  sessionScan: "scriptoria:session:*",
   /** The capped stream of PTY bytes for one run (ADR-006). */
   runStream: (runId: string) => `scriptoria:run:${runId}:stream`,
   /** Keystrokes, published to whichever worker holds this run's PTY. */

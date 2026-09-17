@@ -16,10 +16,20 @@ off the script VM, a live bidirectional terminal, a staged abort and a result do
 whole path, end to end, against the dev fixtures. That closes the four risky assumptions build
 order §1 names: the LDAP bind, SSH/PTY interactivity, stream latency and SFTP result access.
 
-What is *not* built yet is most of the product around it: area administration (FA-11), the
-result ZIP (FA-09.3), recurring jobs (FA-10), the audit view and the OpenAPI document. The
-first UI draft is deliberately a throwaway iteration and is meant to be rebuilt once it has
-been seen (NFR-14). Directories marked *(planned)* below do not exist yet.
+**Area administration is up** too — build order §2, and the step that stops the platform being
+functionless. The root account creates areas, maps script directories onto them and entitles
+directory groups (FA-11.1 … FA-11.5), every change is audited (FA-12.2), and a revocation
+takes effect on live sessions rather than at the next login: an administrator loses an area
+mid-session, without being signed out. That last part is what NFR-03 actually asks for, and
+it is why sessions are held server-side instead of in a token.
+
+An area that anything has ever been run in cannot be deleted — a 409, not a cascade. Run
+history outranks tidying up the configuration (FA-12.1).
+
+What is *not* built yet: the result ZIP (FA-09.3), recurring jobs (FA-10), the audit view and
+the OpenAPI document. The first UI draft is deliberately a throwaway iteration and is meant to
+be rebuilt once it has been seen (NFR-14). Directories marked *(planned)* below do not exist
+yet.
 
 Full requirements: [`docs/requirements/requirements.md`](docs/requirements/requirements.md).
 The architecture model: [`docs/architecture/workspace.dsl`](docs/architecture/workspace.dsl).
@@ -157,6 +167,11 @@ make run                # frontend :3000, backend :3001, runner
 `make db-push` exists but currently fails against this schema: drizzle-kit cannot introspect
 the expression index on `area_entitlements` (`lower(directory_group)`). `make db-migrate` is
 the working path and the one the deployment uses anyway.
+
+On a database whose schema arrived by some route other than `db-migrate`, the migration
+journal is empty while the tables already exist, and `make db-migrate` then fails re-creating
+the enums. It is a first-run mismatch rather than a schema problem: drop the database volume
+(`make dev-down && docker volume rm infra_postgres_data`) and migrate into it clean.
 
 `.env` is worth copying rather than skipping: the schema defaults in `packages/config` are the
 production-shaped ones — TLS verification on, `Secure` cookies — and the example file is what

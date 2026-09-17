@@ -63,6 +63,25 @@ export function isRoot(groups: readonly string[], rootGroups: readonly string[])
 }
 
 /**
+ * Whether two area sets are the same set, ignoring order.
+ *
+ * The administrative sweep (NFR-03) re-resolves every live session after a
+ * mapping changes, and most sessions are unaffected by any one change. This is
+ * what lets it rewrite only the sessions that actually moved — which matters
+ * beyond saving a write, because rewriting a session also resets its idle
+ * window, and one administrator editing an area must not silently extend
+ * everybody else's session.
+ *
+ * Both sides come from `resolveAreaIds`, which de-duplicates, so equal length
+ * plus containment is set equality. No sort, and no order implied by either.
+ */
+export function sameAreaSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const held = new Set(b);
+  return a.every((id) => held.has(id));
+}
+
+/**
  * The check every run, result and schedule route performs before it touches
  * anything. It takes the session's area set rather than the session, because a
  * function that cannot see a session cannot be talked into trusting one.

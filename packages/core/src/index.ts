@@ -10,6 +10,7 @@ export {
   resolveAreaIds,
   isRoot,
   canAccessArea,
+  sameAreaSet,
   groupNameFromDn,
   type AreaEntitlement,
 } from "./authorization";
