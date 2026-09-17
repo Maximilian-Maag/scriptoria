@@ -1,0 +1,167 @@
+name: CI
+
+# Pull requests only. A push to dev, staging or main is a merge of something
+# this workflow has already passed, so running it again answers a question that
+# was answered ten seconds earlier — and the branch protections are what make
+# that true, not this file.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A second push to the same branch makes the first run's answer worthless, so
+# stop paying for it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Static analysis ──────────────────────────────────────────────────────────
+  #
+  # Both halves in one job because they share an install and each takes seconds.
+  # Splitting them would double the setup cost to parallelise ninety seconds of
+  # work, and would add a second required check to two branch protections.
+  check:
+    name: Type-check & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      # Every workspace package in parallel, which is what `make type-check`
+      # does — through the Makefile so CI and a developer's machine run the
+      # same command and cannot drift into disagreeing.
+      - name: Type-check
+        run: make type-check
+
+      - name: Lint
+        run: make lint
+
+  # ── Tests ────────────────────────────────────────────────────────────────────
+  #
+  # One leg per package, so a slow suite stops being every suite's problem and a
+  # red frontend does not hide a red runner.
+  #
+  # None of these need Postgres or Redis today: `packages/core` is pure by
+  # construction — the authorisation rules, the crontab parser and the frame
+  # codec are all written to be testable without a directory or a database
+  # anywhere near them — and the runner's suite covers its host-key and
+  # transcript handling in the same way. The backend and frontend legs run with
+  # `--passWithNoTests` and are here to fail the day somebody adds a test that
+  # needs a service, rather than to be added in a hurry on that day.
+  test-matrix:
+    name: Test (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      # A frontend failure should not cancel the core leg: knowing about both is
+      # the point of splitting them.
+      fail-fast: false
+      matrix:
+        include:
+          - package: packages
+            command: pnpm --filter '@scriptoria/*' test
+          - package: runner
+            command: pnpm --filter runner test
+          - package: backend
+            command: pnpm --filter backend test
+          - package: frontend
+            command: pnpm --filter frontend test
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: Test ${{ matrix.package }}
+        run: ${{ matrix.command }}
+
+  # The name branch protection knows. It stays green or red with the legs, so
+  # the matrix can be reshaped — a leg added, a leg split — without anybody
+  # having to edit a protection rule before it gates anything again.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: [test-matrix]
+    if: always()
+    steps:
+      - name: Report the matrix result
+        run: |
+          echo "test-matrix: ${{ needs.test-matrix.result }}"
+          [ "${{ needs.test-matrix.result }}" = "success" ]
+
+  # ── Build ────────────────────────────────────────────────────────────────────
+  #
+  # Not behind `test`: a build failure is not caused by a test failure, and
+  # learning about both at once beats learning about them in sequence.
+  #
+  # This is the job that catches what type-checking cannot. Both web tiers are
+  # Next.js applications whose route handlers are collected and compiled at
+  # build time, so a route that type-checks in isolation and fails to be built —
+  # a bad `export const dynamic`, a server/client boundary crossed by an
+  # import — is invisible until here.
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      # No environment is set, and that is a property worth keeping rather than
+      # an omission. `packages/config` validates lazily — `defineConfig` returns
+      # a getter and nothing calls it at import time — so a build needs no
+      # database URL, no directory and no secret. Verified by building with the
+      # `.env` moved aside; if a module ever starts reading configuration while
+      # it is being imported, this job goes red and says so, which is the right
+      # moment to find out rather than at the first deploy.
+      - name: Build
+        run: make build
+
+  # ── Architecture model ───────────────────────────────────────────────────────
+  #
+  # docs/architecture/workspace.dsl is the source of truth for the architecture
+  # and its renders are gitignored, so nothing else would notice a model that
+  # stopped parsing. Only run when the model or its tooling changed: the
+  # renderers are pinned containers and pulling them costs more than the render.
+  diagrams:
+    name: Architecture model
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check whether the model or its tooling changed
+        id: changed
+        run: |
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" \
+               | grep -qE '^docs/architecture/workspace\.dsl$|^scripts/diagrams(Tools)?\.ts$'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: ./.github/actions/setup
+        if: steps.changed.outputs.changed == 'true'
+
+      - name: Render the C4 views
+        if: steps.changed.outputs.changed == 'true'
+        run: make diagrams-png
+
+      # Handed to the reviewer, because a diagram is the one review comment that
+      # is easier to look at than to read.
+      - name: Publish the rendered views
+        if: steps.changed.outputs.changed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: architecture-diagrams
+          path: docs/architecture/diagrams
+          retention-days: 7
