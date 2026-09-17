@@ -192,6 +192,19 @@ export async function removeEntitlement(areaId: string, entitlementId: string): 
   return rows.length > 0;
 }
 
+/**
+ * Every area id, for the root account's views.
+ *
+ * Root is entitled to no areas of its own — entitlement is what administrators
+ * have, and root is the account that decides what they are entitled to. So a
+ * root-scoped read cannot go through a session's area set: there is nothing in
+ * it, by design.
+ */
+export async function listAllAreaIds(): Promise<string[]> {
+  const rows = await db().select({ id: schema.areas.id }).from(schema.areas);
+  return rows.map((row) => row.id);
+}
+
 /** Every source of every area the session may see — what the scanner works from. */
 export async function listSourcesForAreas(areaIds: readonly string[]) {
   if (areaIds.length === 0) return [];

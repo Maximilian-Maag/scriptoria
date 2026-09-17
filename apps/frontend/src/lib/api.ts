@@ -13,7 +13,9 @@ import type {
   RunEvent,
   RunListQuery,
   RunTranscript,
+  Schedule,
   Script,
+  UpdateScheduleRequest,
   SessionResponse,
   StartRunRequest,
   UpdateAreaRequest,
@@ -122,6 +124,21 @@ export const api = {
    */
   resultFileUrl: (runId: string, path: string) =>
     `/api/proxy/runs/${runId}/results/file?path=${encodeURIComponent(path)}`,
+
+  /**
+   * FA-10.1 — the recurring scripts of an area, read live off the script VM's
+   * crontab. There is no cached copy here for the same reason there is none in
+   * the control plane: ADR-005 makes the crontab the truth.
+   */
+  schedules: (areaId?: string) =>
+    call<Schedule[]>(`/schedules${areaId ? `?areaId=${encodeURIComponent(areaId)}` : ""}`),
+
+  /** FA-10.4 — root only, and only ever the expression and the enabled flag. */
+  updateSchedule: (scheduleId: string, request: UpdateScheduleRequest) =>
+    call<Schedule>(`/schedules/${scheduleId}`, {
+      method: "PATCH",
+      body: JSON.stringify(request),
+    }),
 
   /** FA-09.1 / FA-09.4 — content to read on screen and to copy, not to save. */
   resultPreview: (runId: string, path: string) =>

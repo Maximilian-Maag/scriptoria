@@ -14,8 +14,12 @@ import type { AbortStage } from "@scriptoria/contracts";
  *
  * It is deliberately small, and every operation on it is one the *platform*
  * needs rather than one SSH happens to offer. Nothing here can execute an
- * arbitrary command: a target starts a script that an administrator mapped and
- * signals the one it started, and that is the whole vocabulary.
+ * arbitrary command: a target starts a script that an administrator mapped,
+ * signals the one it started, reads files it was pointed at, and reads and
+ * writes the account's crontab. That closed set is the whole vocabulary, and
+ * keeping it closed is what makes the SSH surface reviewable — `readCrontab`
+ * and `writeCrontab` are two named operations for exactly that reason, rather
+ * than the general "run this" they could have been.
  */
 
 export interface TargetAddress {
@@ -110,7 +114,29 @@ export interface ExecutionTarget {
   readHead(path: string, maxBytes: number): Promise<Buffer>;
 
   /** Streams a result file out, chunk by chunk, so a large one is not buffered. */
-  read(path: string, maxBytes: number, onChunk: (chunk: Buffer) => Promise<void>): Promise<ReadResult>;
+  read(
+    path: string,
+    maxBytes: number,
+    onChunk: (chunk: Buffer) => Promise<void>,
+  ): Promise<ReadResult>;
+
+  /**
+   * ADR-005 — the account's crontab, read through `crontab -l`.
+   *
+   * Null when the account has no crontab at all, which is an ordinary state and
+   * not a failure: a script VM where nothing has been scheduled yet.
+   */
+  readCrontab(): Promise<string | null>;
+
+  /**
+   * Replaces the account's crontab wholesale, through `crontab -`.
+   *
+   * Wholesale because that is the only operation cron offers — there is no way
+   * to edit one line. The caller is responsible for having read, modified and
+   * re-rendered the file so that everything it does not manage survives
+   * byte-for-byte, which is what `writeManagedBlock` in @scriptoria/core is for.
+   */
+  writeCrontab(text: string): Promise<void>;
 
   /** Best effort, after the process is gone. Never a reason to fail a run. */
   cleanup(runId: string): Promise<void>;

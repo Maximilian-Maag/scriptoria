@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type Redis from "ioredis";
 import {
   RPC_FRAME,
+  crontabResultSchema,
   listFilesResultSchema,
   readFileHeaderSchema,
   rpcErrorSchema,
@@ -61,6 +62,33 @@ export async function listFiles(
       return parsed.success ? ok(parsed.data) : err("internal", "The listing came back unreadable");
     },
   );
+}
+
+/**
+ * ADR-005 — the account's crontab on a script VM.
+ *
+ * Null content is not an error: an account with no crontab is a script VM where
+ * nothing has been scheduled yet, which is where every deployment starts.
+ */
+export async function readCrontab(target: SshTarget): Promise<Result<string | null>> {
+  return single({ kind: "readCrontab", id: randomUUID(), target }, (payload) => {
+    const parsed = crontabResultSchema.safeParse(payload);
+    return parsed.success
+      ? ok(parsed.data.content)
+      : err("internal", "The crontab came back unreadable");
+  });
+}
+
+/**
+ * FA-10.4 — the crontab back again, whole.
+ *
+ * Whole because `crontab` has no notion of editing one line. Everything outside
+ * the platform's managed block has to have been preserved by the caller before
+ * this is reached, which is what makes ADR-005's byte-for-byte promise a
+ * property of pure, tested code rather than of this network call.
+ */
+export async function writeCrontab(target: SshTarget, text: string): Promise<Result<null>> {
+  return single({ kind: "writeCrontab", id: randomUUID(), target, text }, () => ok(null));
 }
 
 /**
@@ -137,7 +165,11 @@ async function single<T>(
   try {
     await redis().lpush(keys.rpcRequests, JSON.stringify(request));
 
-    const frame = await nextFrame(connection, keys.rpcReply(request.id), FIRST_FRAME_TIMEOUT_SECONDS);
+    const frame = await nextFrame(
+      connection,
+      keys.rpcReply(request.id),
+      FIRST_FRAME_TIMEOUT_SECONDS,
+    );
     if (!frame.ok) return frame;
     if (frame.value.kind !== RPC_FRAME.JSON) {
       return err("internal", "The runner answered with no payload");

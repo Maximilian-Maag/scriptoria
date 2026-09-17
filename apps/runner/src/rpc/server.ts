@@ -16,8 +16,8 @@ import { blockingConnection, keys, redis } from "../redis";
 import { describeError, log } from "../log";
 
 /**
- * The two things the control plane cannot do for itself: look at the script
- * directory, and read a result file.
+ * The things the control plane cannot do for itself: look at the script
+ * directory, read a result file, and read or write the account's crontab.
  *
  * Both are reads of the script VM's filesystem, and ADR-001 keeps the SSH key
  * material in exactly one container — so they are asked for here instead. A
@@ -102,11 +102,22 @@ export class RpcServer {
           break;
         case "listFiles":
           await reply.json(
-            await listFiles(target, request.directory, request.since ? new Date(request.since) : null),
+            await listFiles(
+              target,
+              request.directory,
+              request.since ? new Date(request.since) : null,
+            ),
           );
           break;
         case "readFile":
           await readFile(target, request.path, request.maxBytes, reply);
+          break;
+        case "readCrontab":
+          await reply.json({ content: await target.readCrontab() });
+          break;
+        case "writeCrontab":
+          await target.writeCrontab(request.text);
+          await reply.json({ content: null });
           break;
       }
       await reply.end();
