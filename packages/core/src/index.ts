@@ -45,6 +45,7 @@ export {
   DEFAULT_CONTENT_TYPE,
   MAX_PREVIEW_BYTES,
 } from "./resultFiles";
+export { collectionSettled, COLLECTION_GRACE_MS } from "./collection";
 export {
   executionCommand,
   abortCommand,

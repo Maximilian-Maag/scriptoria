@@ -2,7 +2,7 @@
 
 import { use, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { isTerminalStatus } from "@scriptoria/contracts";
+import { collectionSettled } from "@scriptoria/core";
 import { ApiFailure, api } from "@/lib/api";
 import { StatusLine } from "@/components/StatusLine";
 import { TerminalView, isLive } from "@/components/TerminalView";
@@ -29,11 +29,13 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
     queryKey: ["run", runId],
     queryFn: () => api.run(runId),
     refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      // Polled while it is live and left alone once it is not. A finished run
-      // does not change, and a page that keeps asking is a page that will keep
-      // asking for as long as somebody leaves the tab open.
-      return status && isTerminalStatus(status) ? false : 2_000;
+      const current = query.state.data;
+      // Polled while it is live, and for as long after as the collector might
+      // still report: a terminal status is not the end of the record, because
+      // `resultCount` arrives after the process exits. Once that has settled the
+      // run does not change again, and a page that kept asking would keep asking
+      // for as long as somebody left the tab open.
+      return current && collectionSettled(current) ? false : 2_000;
     },
   });
 

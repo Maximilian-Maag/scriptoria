@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { Run } from "@scriptoria/contracts";
+import { collectionSettled } from "@scriptoria/core";
 import { ApiFailure, api } from "@/lib/api";
 import { ResultPreviewDialog } from "./ResultPreviewDialog";
 
@@ -32,9 +33,23 @@ export function ResultPanel({ run }: { run: Run }) {
   const results = useQuery({
     queryKey: ["results", run.id],
     queryFn: () => api.results(run.id),
-    // While the run is going there is nothing to collect yet — the collector
-    // lists the output directory when the run ends.
-    refetchInterval: run.finishedAt ? false : 5_000,
+    /**
+     * Polled until the collection has actually reported — *not* until the run
+     * finishes. The collector lists the output directory after the process
+     * exits, so stopping at `finishedAt` stopped one beat too early and left
+     * this panel saying "No result files" beside a status line that said there
+     * were four. `collectionSettled` is that rule, and it is tested.
+     */
+    refetchInterval: (query) => {
+      // Two conditions, and the second one is not redundant: the run record and
+      // this list are polled independently, so the count can land here first and
+      // switch the polling off while this query still holds the empty list it
+      // fetched a moment earlier. Asking until the two agree is what closes it.
+      const held = query.state.data?.files.length ?? 0;
+      const collected = run.resultCount;
+      if (collectionSettled(run) && (collected === null || held >= collected)) return false;
+      return 3_000;
+    },
   });
 
   const list = results.data;
