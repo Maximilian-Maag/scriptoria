@@ -26,6 +26,13 @@ it is why sessions are held server-side instead of in a token.
 An area that anything has ever been run in cannot be deleted — a 409, not a cascade. Run
 history outranks tidying up the configuration (FA-12.1).
 
+**Build order §3 is closed** — selection and start as two steps (FA-04.1), a start with no
+parameters in the script's own service context (FA-05.2, FA-05.3), the dialogue over the PTY
+(FA-06), the live terminal and its durable history (FA-07), and the staged abort confirmed by
+name for a modifying script (FA-08.3). The run history that makes a finished run findable
+again came with it: without it a closed tab lost the run, and with it the results FA-09.5
+wants kept visible for a run that *failed*.
+
 What is *not* built yet: the result ZIP (FA-09.3), recurring jobs (FA-10), the audit view and
 the OpenAPI document. The first UI draft is deliberately a throwaway iteration and is meant to
 be rebuilt once it has been seen (NFR-14). Directories marked *(planned)* below do not exist
