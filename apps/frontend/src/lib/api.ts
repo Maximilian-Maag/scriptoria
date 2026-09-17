@@ -10,6 +10,7 @@ import type {
   ResultList,
   Run,
   RunEvent,
+  RunListQuery,
   RunTranscript,
   Script,
   SessionResponse,
@@ -25,6 +26,14 @@ import type {
  * Every call goes through `/api/proxy`, which is the browser's only route to
  * the control plane. Nothing here knows the backend's address.
  */
+
+/** What `GET /runs` answers with: one page of runs, and how big the whole is. */
+export interface RunList {
+  items: Run[];
+  total: number;
+  limit: number;
+  offset: number;
+}
 
 export class ApiFailure extends Error {
   constructor(
@@ -82,6 +91,20 @@ export const api = {
     call<Run>("/runs", { method: "POST", body: JSON.stringify(request) }),
 
   run: (runId: string) => call<Run>(`/runs/${runId}`),
+
+  /**
+   * FA-05.4, FA-09.5 — the run history, so a finished run can be found again
+   * and its result checked. Bounded to the session's areas by the control
+   * plane; nothing here widens it.
+   */
+  runs: (query: Partial<RunListQuery> = {}) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    const search = params.toString();
+    return call<RunList>(`/runs${search ? `?${search}` : ""}`);
+  },
 
   runEvents: (runId: string) => call<RunEvent[]>(`/runs/${runId}/events`),
 

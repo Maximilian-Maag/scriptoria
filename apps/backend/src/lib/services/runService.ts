@@ -86,12 +86,27 @@ export async function getRun(session: Session, runId: string): Promise<Result<Ru
   return ok(await reapIfOrphaned(run));
 }
 
+/**
+ * FA-05.4 and FA-09.5 — the history that makes a finished run findable again.
+ *
+ * Bounded by the session's areas in the repository, so an administrator's list
+ * cannot contain a run from an area they are not entitled to (NFR-18). An
+ * empty area set produces an empty list rather than every run.
+ *
+ * The rows are reaped on the way out for the same reason single reads are: a
+ * stale row only matters to somebody looking at it, and a list is somebody
+ * looking at it. Without this a run whose worker died shows as `Running`
+ * forever in the one view somebody would open to find out what happened to it.
+ * Only non-terminal rows cost anything — a finished run returns before it
+ * touches Redis, and in any realistic list nearly all of them are finished.
+ */
 export async function listRuns(
   session: Session,
   filter: RunListQuery,
 ): Promise<Result<{ items: Run[]; total: number; limit: number; offset: number }>> {
   const { items, total } = await runRepository.listRuns(session.areaIds, filter);
-  return ok({ items, total, limit: filter.limit, offset: filter.offset });
+  const reaped = await Promise.all(items.map((run) => reapIfOrphaned(run)));
+  return ok({ items: reaped, total, limit: filter.limit, offset: filter.offset });
 }
 
 export async function listEvents(session: Session, runId: string): Promise<Result<RunEvent[]>> {
