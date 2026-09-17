@@ -62,6 +62,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           <AreaList areas={areas.data ?? []} loading={areas.isLoading} />
         </div>
 
+        {/* FA-11. Shown only to the root account, because it is the only
+            account the administration routes will answer — a link that always
+            leads to a 403 is worse than no link. The control plane enforces
+            this independently; this is the navigation being honest, not the
+            check itself. */}
+        {user.role === "root" ? <AdminLink /> : null}
+
         <div className="border-t border-line px-5 py-3">
           <p className="truncate text-xs font-medium text-ink">{user?.displayName}</p>
           <p className="truncate text-[11px] text-ink-faint">{user?.username}</p>
@@ -76,6 +83,26 @@ export function AppShell({ children }: { children: ReactNode }) {
       </nav>
 
       <main className="min-w-0 flex-1 overflow-hidden">{children}</main>
+    </div>
+  );
+}
+
+function AdminLink() {
+  const pathname = usePathname();
+  const active = pathname.startsWith("/admin");
+
+  return (
+    <div className="border-t border-line px-3 py-3">
+      <Link
+        href="/admin/areas"
+        className={`block rounded-[var(--radius-control)] px-2 py-1.5 text-[13px] ${
+          active
+            ? "bg-accent-quiet font-medium text-accent"
+            : "text-ink-muted hover:bg-surface-sunken hover:text-ink"
+        }`}
+      >
+        Areas &amp; entitlements
+      </Link>
     </div>
   );
 }
@@ -96,8 +123,8 @@ function AreaList({ areas, loading }: { areas: AreaSummary[]; loading: boolean }
       <div className="rounded-[var(--radius-panel)] bg-surface-sunken px-3 py-3">
         <p className="text-xs font-medium text-ink">No areas yet</p>
         <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
-          Your account is signed in, and none of its directory groups is entitled to an area
-          yet. Ask whoever maintains the group mapping to add one.
+          Your account is signed in, and none of its directory groups is entitled to an area yet.
+          Ask whoever maintains the group mapping to add one.
         </p>
       </div>
     );

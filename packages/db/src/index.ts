@@ -12,6 +12,7 @@
  * change stops here.
  */
 export { db, closeDb, schema, type Database } from "./client";
+export { isUniqueViolation, isForeignKeyViolation } from "./errors";
 
 export * as areaRepository from "./repositories/areaRepository";
 export * as auditRepository from "./repositories/auditRepository";

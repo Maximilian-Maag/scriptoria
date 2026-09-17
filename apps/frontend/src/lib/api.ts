@@ -1,7 +1,11 @@
 import type {
   AbortRunRequest,
   ApiError,
+  Area,
   AreaSummary,
+  CreateAreaRequest,
+  CreateGroupEntitlementRequest,
+  CreateScriptSourceRequest,
   LoginRequest,
   ResultList,
   Run,
@@ -10,6 +14,7 @@ import type {
   Script,
   SessionResponse,
   StartRunRequest,
+  UpdateAreaRequest,
 } from "@scriptoria/contracts";
 
 /**
@@ -93,4 +98,45 @@ export const api = {
    */
   resultFileUrl: (runId: string, path: string) =>
     `/api/proxy/runs/${runId}/results/file?path=${encodeURIComponent(path)}`,
+
+  /**
+   * FA-11. Grouped under `admin` because these are the root account's calls and
+   * nothing else's — the same split the control plane makes with `requireRoot`,
+   * visible on this side too rather than only on the wire.
+   *
+   * Every mutation answers with the whole area, so a component never has to
+   * reconstruct what the server now holds from what it just sent.
+   */
+  admin: {
+    areas: () => call<Area[]>("/admin/areas"),
+
+    createArea: (request: CreateAreaRequest) =>
+      call<Area>("/admin/areas", { method: "POST", body: JSON.stringify(request) }),
+
+    updateArea: (areaId: string, request: UpdateAreaRequest) =>
+      call<Area>(`/admin/areas/${areaId}`, {
+        method: "PATCH",
+        body: JSON.stringify(request),
+      }),
+
+    deleteArea: (areaId: string) => call<void>(`/admin/areas/${areaId}`, { method: "DELETE" }),
+
+    addSource: (areaId: string, request: CreateScriptSourceRequest) =>
+      call<Area>(`/admin/areas/${areaId}/sources`, {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+
+    removeSource: (areaId: string, sourceId: string) =>
+      call<Area>(`/admin/areas/${areaId}/sources/${sourceId}`, { method: "DELETE" }),
+
+    grantEntitlement: (areaId: string, request: CreateGroupEntitlementRequest) =>
+      call<Area>(`/admin/areas/${areaId}/entitlements`, {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+
+    revokeEntitlement: (areaId: string, entitlementId: string) =>
+      call<Area>(`/admin/areas/${areaId}/entitlements/${entitlementId}`, { method: "DELETE" }),
+  },
 };
