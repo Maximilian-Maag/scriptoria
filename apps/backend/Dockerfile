@@ -13,6 +13,7 @@
 # over an existing tree adds to it rather than thinning it — so the production
 # tree is built once, from a clean base, and the build's tree is never shipped.
 
+# ADR-010 — why these images ship TypeScript and run it through tsx.
 FROM node:22-alpine AS base
 RUN corepack enable
 WORKDIR /app

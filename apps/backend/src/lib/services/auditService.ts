@@ -6,7 +6,8 @@ import { ok, type Result } from "../result";
  * FA-12's read. Everything else in the product *writes* the audit log as a side
  * effect of doing something; this is the one module that reads it back.
  *
- * It takes no session, exactly as `listAllAreas` does and for the same reason:
+ * ADR-008 is the decision and its argument. It takes no session, exactly as
+ * `listAllAreas` does and for the same reason:
  * the route above it is `requireRoot`, and an audit log filtered by the reader's
  * own entitlements is not an audit log. The roles table gives an administrator
  * the areas, scripts, runs and results their groups reach (FA-02.4) and nothing

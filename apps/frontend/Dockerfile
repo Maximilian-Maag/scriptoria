@@ -9,6 +9,7 @@
 # being a separate image: the browser talks only to this, and this talks only to
 # the control plane.
 
+# ADR-010 — why these images ship TypeScript and run it through tsx.
 FROM node:22-alpine AS base
 RUN corepack enable
 WORKDIR /app

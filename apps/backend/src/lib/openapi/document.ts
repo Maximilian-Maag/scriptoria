@@ -38,7 +38,7 @@ import {
  * The REST contract, generated from the schemas the routes actually validate
  * with — never written alongside them.
  *
- * This is the promise ADR-002 makes for the monorepo. A hand-written API
+ * ADR-009 is the decision. This is the promise ADR-002 makes for the monorepo. A hand-written API
  * document is a second definition of the same thing, and a second definition
  * drifts: it is wrong the first time a field is added and nobody notices until
  * an integrator builds against it. Here a field that does not exist in

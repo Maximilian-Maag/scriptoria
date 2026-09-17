@@ -3,7 +3,7 @@ import { openApiDocument } from "./document";
 /**
  * The contract, rendered server-side into one self-contained page.
  *
- * Swagger UI would be the obvious choice and is deliberately not used. NFR-01
+ * Swagger UI would be the obvious choice and is deliberately not used (ADR-009). NFR-01
  * puts this platform in a private network with no route out: a page that pulls
  * its own renderer off a CDN is a page that is blank in exactly the environment
  * this product runs in, and vendoring the dist bundle buys an asset-copying

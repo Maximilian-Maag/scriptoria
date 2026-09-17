@@ -12,6 +12,7 @@
 # this package is `tsc --noEmit`, and the runner ships its TypeScript source and
 # is run by tsx exactly as the two web tiers are.
 
+# ADR-010 — why these images ship TypeScript and run it through tsx.
 FROM node:22-alpine AS base
 RUN corepack enable
 WORKDIR /app
