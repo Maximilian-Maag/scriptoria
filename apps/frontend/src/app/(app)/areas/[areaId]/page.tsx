@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Script } from "@scriptoria/contracts";
 import { ApiFailure, api } from "@/lib/api";
+import { AreaTabs } from "@/components/AreaTabs";
 import { CriticalityBadge } from "@/components/CriticalityBadge";
 
 /**
@@ -53,21 +54,21 @@ export default function AreaPage({ params }: { params: Promise<{ areaId: string 
   return (
     <div className="flex h-full">
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-line px-6 py-4">
-          <div>
-            <h1 className="text-sm font-semibold text-ink">Scripts</h1>
+        <header className="border-b border-line px-6 py-4">
+          <AreaTabs areaId={areaId} />
+          <div className="mt-3 flex items-center justify-between gap-3">
             <p className="text-[11px] text-ink-faint">
               {scripts.data ? `${scripts.data.length} in this area` : "Reading the script VM…"}
             </p>
+            <button
+              type="button"
+              onClick={() => rescan.mutate()}
+              disabled={rescan.isPending}
+              className="rounded-[var(--radius-control)] border border-line px-2.5 py-1.5 text-[11px] text-ink-muted hover:bg-surface-sunken disabled:opacity-60"
+            >
+              {rescan.isPending ? "Reading…" : "Rescan"}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => rescan.mutate()}
-            disabled={rescan.isPending}
-            className="rounded-[var(--radius-control)] border border-line px-2.5 py-1.5 text-[11px] text-ink-muted hover:bg-surface-sunken disabled:opacity-60"
-          >
-            {rescan.isPending ? "Reading…" : "Rescan"}
-          </button>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -164,8 +165,8 @@ export default function AreaPage({ params }: { params: Promise<{ areaId: string 
             </button>
 
             <p className="text-[11px] leading-relaxed text-ink-faint">
-              It starts with no parameters. Anything it needs, it asks for in the terminal once
-              it is running.
+              It starts with no parameters. Anything it needs, it asks for in the terminal once it
+              is running.
             </p>
           </div>
         </aside>
