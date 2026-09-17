@@ -2,8 +2,9 @@ import { z } from "zod";
 import { defineConfig, intFromEnv, boolFromEnv, nonEmpty } from "./load";
 import { sharedSchema } from "./shared";
 import { redisSchema } from "./redis";
+import { databaseSchema } from "./database";
 
-export const runnerSchema = sharedSchema.merge(redisSchema).extend({
+export const runnerSchema = sharedSchema.merge(redisSchema).merge(databaseSchema).extend({
   /**
    * One worker claims one run at a time per slot (see the Job Consumer in the
    * model). Raising this raises the number of concurrent PTYs one process holds,

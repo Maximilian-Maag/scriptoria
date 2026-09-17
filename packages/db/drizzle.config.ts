@@ -15,7 +15,7 @@ const envFile = resolve(process.cwd(), "../../.env");
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 export default defineConfig({
-  schema: "./src/lib/db/schema.ts",
+  schema: "./src/schema.ts",
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {

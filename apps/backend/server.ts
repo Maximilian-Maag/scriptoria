@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import next from "next";
 import { loadBackendConfig, loadEnvFile } from "@scriptoria/config";
 import { handleUpgrade } from "./src/lib/stream/gateway";
-import { closeDb } from "./src/lib/db/client";
+import { closeDb } from "@scriptoria/db";
 import { closeRedis } from "./src/lib/redis";
 
 /**

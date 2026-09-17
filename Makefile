@@ -30,8 +30,8 @@ help:
 	@echo "  test-db               create the test and e2e databases in the running Postgres"
 	@echo "  test-db-prune         drop the per-directory test databases"
 	@echo "  db-generate           generate a Drizzle migration from the schema"
-	@echo "  db-migrate            apply pending migrations"
-	@echo "  db-push               push the schema straight to the database (dev only)"
+	@echo "  db-migrate            apply pending migrations (the working path)"
+	@echo "  db-push               push the schema straight to the database — see the note below"
 	@echo "  db-studio             open Drizzle Studio"
 	@echo "  db-seed               seed the initial root group mapping and the reference area"
 	@echo "  docker-build          build all three images"
@@ -107,19 +107,23 @@ test-db-prune:
 	done
 
 db-generate:
-	$(PNPM) --filter backend db:generate
+	$(PNPM) --filter @scriptoria/db db:generate
 
 db-migrate:
-	$(PNPM) --filter backend db:migrate
+	$(PNPM) --filter @scriptoria/db db:migrate
 
+# Currently fails against this schema: drizzle-kit cannot introspect the
+# expression index on area_entitlements (lower(directory_group)). Kept because
+# it is the right tool once that is fixed upstream; use db-migrate meanwhile,
+# which is what the deployment runs anyway.
 db-push:
-	$(PNPM) --filter backend db:push
+	$(PNPM) --filter @scriptoria/db db:push
 
 db-studio:
-	$(PNPM) --filter backend db:studio
+	$(PNPM) --filter @scriptoria/db db:studio
 
 db-seed:
-	$(PNPM) --filter backend db:seed
+	$(PNPM) --filter @scriptoria/db db:seed
 
 docker-build-frontend:
 	docker build -t scriptoria-frontend:latest -f apps/frontend/Dockerfile .

@@ -1,4 +1,4 @@
-import { db } from "@/lib/db/client";
+import { db } from "@scriptoria/db";
 import { redis } from "@/lib/redis";
 import { sql } from "drizzle-orm";
 

@@ -1,0 +1,29 @@
+{
+  "name": "runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "build": "tsc --noEmit",
+    "start": "NODE_ENV=production tsx src/index.ts",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@scriptoria/config": "workspace:*",
+    "@scriptoria/contracts": "workspace:*",
+    "@scriptoria/core": "workspace:*",
+    "@scriptoria/db": "workspace:*",
+    "ioredis": "^5.4.2",
+    "ssh2": "^1.16.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/ssh2": "^1.15.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

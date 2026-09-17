@@ -131,6 +131,15 @@ export async function recordAbortRequest(
     .where(eq(schema.runs.id, id));
 }
 
+/**
+ * Set by the collector once the output directory has been listed. Separate from
+ * `transition` on purpose: the count says what the run left behind, and must
+ * not be able to move the run to a different state on its way in.
+ */
+export async function setResultCount(id: string, count: number): Promise<void> {
+  await db().update(schema.runs).set({ resultCount: count }).where(eq(schema.runs.id, id));
+}
+
 export async function appendEvent(
   runId: string,
   kind: schema.RunEventRow["kind"],
