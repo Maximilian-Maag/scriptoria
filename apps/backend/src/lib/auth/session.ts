@@ -182,7 +182,24 @@ export async function destroySession(id: string): Promise<void> {
   await redis().del(keys.session(id));
 }
 
-/** The cookie, with the attributes NFR-02 and the session design require. */
+/**
+ * The cookie, with the attributes NFR-02 and the session design require.
+ *
+ * `Max-Age` is the **absolute** lifetime, not the idle window. The browser's copy
+ * is a janitor; the authority is the session in Redis, and the two were disagreeing
+ * in the direction that signs people out. With the idle window here, an operator
+ * who was working continuously lost the cookie after
+ * `SESSION_IDLE_TIMEOUT_SECONDS` while the session it pointed at — slid forward by
+ * every request — was still alive, and the absolute timeout that exists to be the
+ * outer bound was never the thing that ended a session, because the cookie always
+ * died first. The login route calls this with no second argument, so this default
+ * *is* the browser's lifetime.
+ *
+ * Inactivity is enforced where it can be enforced honestly: the Redis key carries
+ * the idle TTL, and `readSession` stops sliding it at the absolute deadline. A
+ * browser that holds a cookie past either of those gets a 401, which is the same
+ * answer it would have got with no cookie at all.
+ */
 export function sessionCookie(id: string, maxAgeSeconds?: number): string {
   const config = loadBackendConfig();
   const parts = [
@@ -192,7 +209,7 @@ export function sessionCookie(id: string, maxAgeSeconds?: number): string {
     // Strict rather than Lax: nothing in this product is reached by following a
     // link from somewhere else, so there is no flow Strict would break.
     "SameSite=Strict",
-    `Max-Age=${maxAgeSeconds ?? config.SESSION_IDLE_TIMEOUT_SECONDS}`,
+    `Max-Age=${maxAgeSeconds ?? config.SESSION_ABSOLUTE_TIMEOUT_SECONDS}`,
   ];
   if (config.SESSION_COOKIE_SECURE) parts.push("Secure");
   return parts.join("; ");
