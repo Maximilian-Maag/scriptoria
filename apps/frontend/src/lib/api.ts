@@ -61,11 +61,17 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     // Every non-2xx from the control plane is the same envelope, so there is
     // one place that turns a failure into something a person can read.
+    //
+    // The envelope is *expected*, not guaranteed: a reverse proxy or an edge in
+    // front of the control plane answers with JSON of its own shape. Both links
+    // are optional for that reason — reading `.code` off an absent `error`
+    // throws, which turns a readable failure into a `TypeError` and loses the
+    // status with it.
     const body = (await response.json().catch(() => null)) as ApiError | null;
     throw new ApiFailure(
       response.status,
-      body?.error.code ?? "internal",
-      body?.error.message ?? "Something went wrong",
+      body?.error?.code ?? "internal",
+      body?.error?.message ?? "Something went wrong",
     );
   }
 
@@ -162,8 +168,8 @@ export const api = {
       const failure = (await response.json().catch(() => null)) as ApiError | null;
       throw new ApiFailure(
         response.status,
-        failure?.error.code ?? "internal",
-        failure?.error.message ?? "The archive could not be built",
+        failure?.error?.code ?? "internal",
+        failure?.error?.message ?? "The archive could not be built",
       );
     }
     return response.blob();
