@@ -11,6 +11,7 @@
     "lint": "eslint src",
     "test": "echo \"no tests in @scriptoria/db\"",
     "db:generate": "drizzle-kit generate",
+    "db:check": "tsx src/checkSchemaDrift.ts",
     "db:migrate": "tsx src/migrate.ts",
     "db:push": "drizzle-kit push --force",
     "db:studio": "drizzle-kit studio",
