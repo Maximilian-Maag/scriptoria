@@ -46,6 +46,15 @@ export async function startRun(
   if (!found) return notFound("No such script");
 
   const { script, source } = found;
+
+  // FA-03.3: a script the newest scan did not find is shown as vanished, and the
+  // entry exists for its history rather than as something to run. Starting it
+  // would open an SSH session to a path that is not there and fail in the
+  // terminal, which reads as a broken script VM rather than as a stale list.
+  if (!scriptRepository.isPresent(script)) {
+    return conflict("This script is no longer on the script VM. Rescan the catalog.");
+  }
+
   const criticality = effectiveCriticality(script.criticalityOverride, script.header);
 
   const run = await runRepository.createRun({
