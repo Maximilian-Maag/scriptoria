@@ -11,7 +11,7 @@ import {
 } from "@scriptoria/contracts";
 import { canAccessArea, decodeTerminalFrame, encodeTerminalFrame } from "@scriptoria/core";
 import { loadBackendConfig } from "@scriptoria/config";
-import { readSession } from "../auth/session";
+import { readSession, type Session } from "../auth/session";
 import { keys, redis, redisSubscriber } from "../redis";
 import { runRepository } from "@scriptoria/db";
 
@@ -43,46 +43,61 @@ function send(socket: WebSocket, message: ServerMessage): void {
 
 function close(socket: WebSocket, message: ServerMessage): void {
   send(socket, message);
+  // Resume before closing. A paused socket cannot read the peer's close frame,
+  // so `close()` on its own waits out ws's close timeout — thirty seconds — with
+  // the connection still held open on this side. The answer is already written;
+  // resuming lets the handshake finish and makes a rejection cost nothing.
+  socket.resume();
   socket.close();
 }
 
 /**
- * Authorises the upgrade before a socket exists.
+ * Authorises the upgrade before the socket exists: the session cookie is read,
+ * and only then is the handshake completed.
  *
- * Rejecting here rather than after the handshake matters: an unauthorised client
- * that gets an open socket and then a close frame has still learned that the run
- * id is real. A 401 on the upgrade tells it nothing.
+ * Doing it in this order is what makes rejection cheap and quiet. An
+ * unauthenticated client gets an HTTP 401 on the duplex rather than a live
+ * WebSocket that is closed a moment later — it never holds a server-side socket
+ * for the length of a close handshake, and it never learns whether a run id is
+ * real. (The run itself is checked after the hello frame, because that is the
+ * first moment a run id is known.)
  */
 export function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): boolean {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   if (url.pathname !== TERMINAL_PATH) return false;
 
-  wss.handleUpgrade(request, socket, head, (ws) => {
-    // Nothing is listening for messages yet — authorising the session is a
-    // round trip to Redis, and a client that sends its hello frame the instant
-    // the socket opens would have it dropped on the floor. Paused here and
-    // resumed once each listener is in place, so no frame is ever lost between
-    // the handshake and the stream.
-    ws.pause();
-
-    void serve(ws, request).catch((cause) => {
-      console.error("terminal gateway failed", cause);
-      close(ws, { type: "end", reason: "server_shutdown", message: "The stream ended" });
-    });
+  void authorise(request, socket, head).catch((cause) => {
+    console.error("terminal upgrade failed", cause);
+    if (socket.writable) socket.destroy();
   });
   return true;
 }
 
-async function serve(socket: WebSocket, request: IncomingMessage): Promise<void> {
+async function authorise(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
   const config = loadBackendConfig();
+  const session = await readSession(cookieValue(request.headers.cookie, config.SESSION_COOKIE_NAME));
 
-  const sessionId = cookieValue(request.headers.cookie, config.SESSION_COOKIE_NAME);
-  const session = await readSession(sessionId);
   if (!session) {
-    close(socket, { type: "end", reason: "unauthorised", message: "Not signed in" });
+    socket.write("HTTP/1.1 401 Unauthorized\r\nconnection: close\r\ncontent-length: 0\r\n\r\n");
+    socket.destroy();
     return;
   }
 
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    // Nothing is listening for messages yet — the hello frame has not been read,
+    // and a client that sends it the instant the socket opens would have it
+    // dropped on the floor. Paused here and resumed once each listener is in
+    // place, so no frame is ever lost between the handshake and the stream.
+    ws.pause();
+
+    void serve(ws, session).catch((cause) => {
+      console.error("terminal gateway failed", cause);
+      close(ws, { type: "end", reason: "server_shutdown", message: "The stream ended" });
+    });
+  });
+}
+
+async function serve(socket: WebSocket, session: Session): Promise<void> {
   const hello = await firstMessage(socket);
   if (!hello) {
     close(socket, { type: "end", reason: "not_found", message: "No hello frame" });
