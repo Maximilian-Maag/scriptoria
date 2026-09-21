@@ -44,11 +44,18 @@ const DEFAULT_MAX_ENTRIES = 5_000;
 const DEFAULT_MAX_DEPTH = 8;
 
 export class SshExecutionTarget implements ExecutionTarget {
-  private readonly client = new Client();
   private sftpWrapper: SFTPWrapper | undefined;
   private closed = false;
 
-  constructor(readonly address: TargetAddress) {}
+  /**
+   * The client is a parameter rather than a field initialiser because this class
+   * is where the runner meets ssh2's event ordering, and the ordering is worth a
+   * test with a peer whose timing is known rather than a real one's.
+   */
+  constructor(
+    readonly address: TargetAddress,
+    private readonly client: Client = new Client(),
+  ) {}
 
   connect(): Promise<void> {
     const config = loadRunnerConfig();
@@ -102,7 +109,19 @@ export class SshExecutionTarget implements ExecutionTarget {
       executable: spec.executable,
     });
 
-    const channel = await new Promise<ClientChannel>((resolve, reject) => {
+    // Everything that listens on the channel is attached *inside* the exec
+    // callback, before this function gets control back. ssh2 emits `exit` from
+    // its packet parser: a peer that confirms the channel and reports the exit
+    // without waiting for us delivers the event before the continuation of an
+    // `await` on this promise runs. Attached afterwards — as this was — an exit
+    // that arrived in that window was never seen, `exit.code` stayed null, and a
+    // run that exited 0 was audited as `failed` with reason `exit_code`
+    // (FA-10.2, FA-12.2). The two private helpers below have always done it this
+    // way; `start` was the exception.
+    const { channel, finished } = await new Promise<{
+      channel: ClientChannel;
+      finished: Promise<ProcessExit>;
+    }>((resolve, reject) => {
       this.client.exec(
         command,
         {
@@ -115,24 +134,31 @@ export class SshExecutionTarget implements ExecutionTarget {
             term: "xterm-256color",
           },
         },
-        (error, stream) => (error ? reject(error) : resolve(stream)),
+        (error, stream) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          // A channel that errors after the process has gone must not be able
+          // to end the worker (see `read`).
+          stream.on("error", (cause: unknown) => {
+            log.debug("terminal channel error", { runId: spec.runId, error: describeError(cause) });
+          });
+          stream.stderr.on("error", () => {});
+
+          let exit: ProcessExit = { code: null, signal: null };
+          stream.on("exit", (code: number | null, signal?: string) => {
+            exit = { code: typeof code === "number" ? code : null, signal: signal ?? null };
+          });
+
+          const settled = new Promise<ProcessExit>((resolveExit) => {
+            stream.once("close", () => resolveExit(exit));
+          });
+
+          resolve({ channel: stream, finished: settled });
+        },
       );
-    });
-
-    // Same reasoning as the read stream: a channel that errors after the
-    // process has gone must not be able to end the worker (see `read`).
-    channel.on("error", (cause: unknown) => {
-      log.debug("terminal channel error", { runId: spec.runId, error: describeError(cause) });
-    });
-    channel.stderr.on("error", () => {});
-
-    let exit: ProcessExit = { code: null, signal: null };
-    channel.on("exit", (code: number | null, signal?: string) => {
-      exit = { code: typeof code === "number" ? code : null, signal: signal ?? null };
-    });
-
-    const finished = new Promise<ProcessExit>((resolve) => {
-      channel.once("close", () => resolve(exit));
     });
 
     return {
