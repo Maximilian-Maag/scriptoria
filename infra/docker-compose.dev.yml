@@ -10,6 +10,14 @@
 #   openldap  → the directory server
 #   sshd      → the script VM, with a script directory, an output directory and a crontab
 
+# Named explicitly. Compose otherwise derives the project name from the
+# directory holding this file — `infra` — so any other checkout on the machine
+# with its own `infra/` compose file lands in the SAME project: one set of
+# containers, one network, one set of volumes. Starting either stack then
+# recreates the other's containers, and `down -v` in either destroys both
+# products' data.
+name: scriptoria
+
 services:
 
   # ── Metadata database ─────────────────────────────────────────────────────────
@@ -21,8 +29,12 @@ services:
       POSTGRES_DB: scriptoria
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    # Off the default 5432 (and Structurizr off 8088 below): a development
+    # machine tends to have more than one Postgres on it — another project's
+    # stack, a system one — and taking the default means stopping that one
+    # first, every time.
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Creates the test and e2e databases on a FRESH volume only. An existing
@@ -113,7 +125,7 @@ services:
     image: structurizr/lite:2025.11.08
     container_name: scriptoria-structurizr
     ports:
-      - "8088:8080"   # → http://localhost:8088
+      - "8089:8080"   # → http://localhost:8089
     volumes:
       - ../docs/architecture:/usr/local/structurizr
     networks: [dev]

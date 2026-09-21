@@ -19,7 +19,7 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env["DATABASE_URL"] ?? "postgres://postgres:postgres@localhost:5432/scriptoria",
+    url: process.env["DATABASE_URL"] ?? "postgres://postgres:postgres@localhost:5433/scriptoria",
   },
   strict: true,
   verbose: true,

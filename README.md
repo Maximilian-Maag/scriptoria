@@ -197,7 +197,7 @@ the working path and the one the deployment uses anyway.
 On a database whose schema arrived by some route other than `db-migrate`, the migration
 journal is empty while the tables already exist, and `make db-migrate` then fails re-creating
 the enums. It is a first-run mismatch rather than a schema problem: drop the database volume
-(`make dev-down && docker volume rm infra_postgres_data`) and migrate into it clean.
+(`make dev-down && docker volume rm scriptoria_postgres_data`) and migrate into it clean.
 
 `.env` is worth copying rather than skipping: the schema defaults in `packages/config` are the
 production-shaped ones — TLS verification on, `Secure` cookies — and the example file is what
@@ -212,7 +212,7 @@ The seeded directory accounts all use the password `Passw0rd!`:
 | `admin.datacenter` | `scriptoria-datacenter` | An administrator entitled to one area |
 | `admin.none` | — | FA-01.4: authenticates successfully and sees nothing |
 
-The architecture model renders at <http://localhost:8088> once `make dev` is up.
+The architecture model renders at <http://localhost:8089> once `make dev` is up.
 
 The dev stack includes an **sshd fixture** — a container with a script directory, an output
 directory and a crontab — standing in for the script VM, and an **OpenLDAP fixture** standing in
@@ -259,7 +259,7 @@ Both renderers — the Structurizr CLI and PlantUML — run in pinned containers
 architecture needs docker but no JRE on the host. `make diagrams-install` pulls them and is the
 only step that touches the network; after that the render works offline, which the target
 environment requires (NFR-01). To read the model rather than export it, Structurizr Lite serves
-it at <http://localhost:8088> once `make dev` is up.
+it at <http://localhost:8089> once `make dev` is up.
 
 Descriptions in the model are deliberately short — a box carrying a paragraph is a box nobody
 reads. The reasoning lives in the ADRs, and the view descriptions link to them.
