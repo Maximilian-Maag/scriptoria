@@ -1,4 +1,9 @@
-import { criticalitySchema, type ScriptHeader } from "@scriptoria/contracts";
+import {
+  SCRIPT_DESCRIPTION_MAX_LENGTH,
+  SCRIPT_TITLE_MAX_LENGTH,
+  criticalitySchema,
+  type ScriptHeader,
+} from "@scriptoria/contracts";
 
 /**
  * ADR-004 — reads a script's self-declared metadata out of its header comment.
@@ -20,10 +25,19 @@ export const MAX_HEADER_LINES = 100;
 const KEY_LINE = /^\s*(?:#+|\/\/)\s*scriptoria:([a-z][a-z0-9_-]*)\s+(.*)$/i;
 
 /**
- * A continuation line: a comment with no `scriptoria:` key, while a key is open. This
- * is what makes the multi-line `description` in ADR-004's example work.
+ * A continuation line: an indented comment with no `scriptoria:` key, while a key
+ * is open. This is what makes the multi-line `description` in ADR-004's example
+ * work.
+ *
+ * Only `description` takes one. It is the only key whose value is prose — every
+ * other key is a single token, and folding a stray indented comment into
+ * `criticality` or `outputs` turns a valid declaration into an unreadable one,
+ * which the catalog then drops along with the rest of the header.
  */
 const CONTINUATION = /^\s*(?:#+|\/\/)\s{2,}(\S.*)$/;
+
+/** The keys whose value a continuation line may extend. */
+const PROSE_KEYS = new Set(["description"]);
 
 /** Anything that is not a comment line ends the header block. */
 const COMMENT_LINE = /^\s*(?:#|\/\/)/;
@@ -59,7 +73,8 @@ export function parseScriptHeader(source: string): ScriptHeader | null {
       continue;
     }
 
-    const continuation = openKey === null ? null : CONTINUATION.exec(line);
+    const continuation =
+      openKey !== null && PROSE_KEYS.has(openKey) ? CONTINUATION.exec(line) : null;
     if (continuation && openKey !== null) {
       const previous = raw.get(openKey) ?? "";
       raw.set(openKey, `${previous} ${stripTrailingComment(continuation[1] ?? "")}`.trim());
@@ -85,11 +100,16 @@ export function parseScriptHeader(source: string): ScriptHeader | null {
 
   const header: ScriptHeader = { extra };
 
+  // Truncated rather than dropped. The contract caps both of these, so a longer
+  // value comes back out of `scriptHeaderSchema.safeParse` as a failure — and
+  // catalogService answers a failed header with *no* header, which would lose the
+  // criticality standing next to an over-long title. Rule 3 of this parser says a
+  // malformed value is ignored, not fatal, and the length cap is no exception.
   const title = raw.get("title");
-  if (title) header.title = title;
+  if (title) header.title = title.slice(0, SCRIPT_TITLE_MAX_LENGTH);
 
   const description = raw.get("description");
-  if (description) header.description = description;
+  if (description) header.description = description.slice(0, SCRIPT_DESCRIPTION_MAX_LENGTH);
 
   const criticality = criticalitySchema.safeParse(raw.get("criticality")?.toLowerCase());
   if (criticality.success) header.criticality = criticality.data;
