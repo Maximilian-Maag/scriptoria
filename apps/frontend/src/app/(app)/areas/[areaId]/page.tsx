@@ -155,13 +155,27 @@ export default function AreaPage({ params }: { params: Promise<{ areaId: string 
               </p>
             ) : null}
 
+            {chosen.present ? null : (
+              /* FA-03.3. The catalogue keeps a script that has gone from the
+                 script VM so that its run history stays readable, and says so
+                 here rather than offering a start that could only fail. */
+              <p className="rounded-[var(--radius-control)] bg-surface-sunken px-3 py-2 text-xs leading-relaxed text-ink-muted">
+                The most recent scan did not find {chosen.fileName} in the script directory. It is
+                listed for its run history, and cannot be started. Rescan, or check the script VM.
+              </p>
+            )}
+
             <button
               type="button"
               onClick={() => start.mutate(chosen.id)}
-              disabled={start.isPending}
+              disabled={start.isPending || !chosen.present}
               className="w-full rounded-[var(--radius-control)] bg-accent px-3 py-2 text-[13px] font-medium text-ink-inverse hover:bg-accent-hover disabled:opacity-60"
             >
-              {start.isPending ? "Starting…" : "Start this script"}
+              {chosen.present
+                ? start.isPending
+                  ? "Starting…"
+                  : "Start this script"
+                : "Not on the script VM"}
             </button>
 
             <p className="text-[11px] leading-relaxed text-ink-faint">
@@ -193,17 +207,24 @@ function ScriptRow({
           selected
             ? "border-accent bg-accent-quiet/40"
             : "border-line bg-surface hover:border-line-strong"
-        }`}
+        } ${script.present ? "" : "opacity-70"}`}
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-[13px] font-medium text-ink">{script.title}</p>
             <p className="truncate font-mono text-[11px] text-ink-faint">{script.fileName}</p>
           </div>
-          <CriticalityBadge
-            criticality={script.criticality}
-            overridden={script.criticalityOverridden}
-          />
+          <span className="flex shrink-0 items-center gap-1.5">
+            <CriticalityBadge
+              criticality={script.criticality}
+              overridden={script.criticalityOverridden}
+            />
+            {script.present ? null : (
+              <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] font-medium text-ink-muted">
+                Not on the VM
+              </span>
+            )}
+          </span>
         </div>
         {script.description ? (
           <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-ink-muted">

@@ -22,6 +22,21 @@ export interface ScannedScript {
   modifiedAt: Date | null;
 }
 
+/**
+ * FA-03.3: whether the newest scan of this script's source still found it.
+ *
+ * `replaceSourceScripts` stamps `presentAt` and `scannedAt` from the same instant
+ * for every script a scan saw, and bumps only `scannedAt` for every script it did
+ * not — so a row is present exactly when the two still agree. The rule is written
+ * as a function rather than assumed at each call site because it is the definition
+ * of whether a catalog entry can be run at all, and the last time it was implied
+ * and never read, a script that had been deleted from the VM stayed in the catalog
+ * and stayed startable.
+ */
+export function isPresent(row: { presentAt: Date; scannedAt: Date }): boolean {
+  return row.presentAt.getTime() >= row.scannedAt.getTime();
+}
+
 export function toScript(
   row: schema.ScriptRow,
   sourceOutputPath: string | null,
@@ -49,6 +64,8 @@ export function toScript(
     sizeBytes: row.sizeBytes,
     modifiedAt: row.modifiedAt?.toISOString() ?? null,
     scannedAt: row.scannedAt.toISOString(),
+    // FA-03.3: the entry is kept when the file is gone, and says so.
+    present: isPresent(row),
   };
 }
 
