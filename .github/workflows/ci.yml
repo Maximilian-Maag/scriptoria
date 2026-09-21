@@ -124,6 +124,58 @@ jobs:
       - name: Build
         run: make build
 
+  # ── Database ─────────────────────────────────────────────────────────────────
+  #
+  # `packages/db` has no unit tests worth the name — its repositories need a
+  # database — so this is the one place on a pull request where the schema is
+  # checked against a real Postgres.
+  #
+  #   · `make db-check` asks the *migrated database* whether it has the shape
+  #     `schema.ts` declares. They are two descriptions of one thing and nothing
+  #     else compares them; they drifted once, and a database built by
+  #     `make db-migrate` could then be neither seeded nor logged into, because
+  #     the login path reads the tables that had been renamed (#24).
+  #   · migrating and seeding an empty database is the deployment's first step
+  #     and the dev stack's second, and both have failed here before.
+  #
+  # The credentials are literals because this container is reachable from
+  # nowhere: it lives for the length of one job.
+  schema:
+    name: Schema & migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: scriptoria_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/scriptoria_ci
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: Apply the migrations to an empty database
+        run: make db-migrate
+
+      - name: The migrated database has the shape schema.ts declares
+        run: make db-check
+
+      # The bootstrap the README tells a new checkout to run, and the step that
+      # fails first when a column has been renamed.
+      - name: Seed the root group and the reference area
+        run: make db-seed
+
   # ── Architecture model ───────────────────────────────────────────────────────
   #
   # docs/architecture/workspace.dsl is the source of truth for the architecture

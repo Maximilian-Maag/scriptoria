@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-down dev-logs run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
+.PHONY: help install dev dev-down dev-logs run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
 
 # pnpm is installed via the standalone script — add its bin dir to PATH so make can find it
 PNPM_HOME ?= $(HOME)/.local/share/pnpm
@@ -29,6 +29,7 @@ help:
 	@echo "  test-e2e              run the Playwright end-to-end suite (requires a live stack)"
 	@echo "  test-db               create the test and e2e databases in the running Postgres"
 	@echo "  test-db-prune         drop the per-directory test databases"
+	@echo "  db-check              fail if schema.ts and the migrations disagree"
 	@echo "  db-generate           generate a Drizzle migration from the schema"
 	@echo "  db-migrate            apply pending migrations (the working path)"
 	@echo "  db-push               push the schema straight to the database — see the note below"
@@ -108,6 +109,16 @@ test-db-prune:
 
 db-generate:
 	$(PNPM) --filter @scriptoria/db db:generate
+
+# The database the migrations build, against the database the code believes in.
+# They are two descriptions of one thing and nothing else compares them: the
+# directory-group columns were renamed in the schema with no migration to follow,
+# and a `make db-migrate` database silently could not seed or log in (#24).
+#
+# Needs a migrated database — `make db-migrate` first, which is exactly what the
+# job in CI and the deployment's unit both do.
+db-check:
+	$(PNPM) --filter @scriptoria/db db:check
 
 db-migrate:
 	$(PNPM) --filter @scriptoria/db db:migrate

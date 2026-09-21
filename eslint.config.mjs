@@ -49,6 +49,7 @@ export default tseslint.config(
       "**/server.ts",
       "**/seed.ts",
       "**/migrate.ts",
+      "**/checkSchemaDrift.ts",
       "**/drizzle.config.ts",
     ],
     rules: { "no-console": "off" },
