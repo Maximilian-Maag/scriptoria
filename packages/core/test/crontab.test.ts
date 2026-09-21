@@ -105,4 +105,41 @@ describe("writeManagedBlock", () => {
     const once = writeManagedBlock(FIXTURE, managedJobs(parseCrontab(FIXTURE)));
     expect(once).toBe(FIXTURE);
   });
+
+  it("repairs an unterminated block instead of writing the jobs a second time", () => {
+    // An interrupted write: the opening delimiter landed, the closing one did
+    // not. `parseCrontab` reads the lines after it as managed, so the writer has
+    // to treat them as its own — appending a second block instead leaves the
+    // original job in place *and* writes it again below, which is a crontab that
+    // runs the same job twice.
+    const interrupted = [
+      'MAILTO="ops@example.com"',
+      MANAGED_BEGIN,
+      "30   4   *   *   1    /usr/bin/find /opt/scriptoria/export -type f -mtime +30 -delete",
+      "",
+    ].join("\n");
+
+    const once = writeManagedBlock(interrupted, managedJobs(parseCrontab(interrupted)));
+    const carrying = once.split("\n").filter((l) => l.includes("/usr/bin/find"));
+
+    expect(carrying).toHaveLength(1);
+    expect(once).toContain(MANAGED_END);
+    expect(once).toContain('MAILTO="ops@example.com"');
+    expect(writeManagedBlock(once, managedJobs(parseCrontab(once)))).toBe(once);
+  });
+
+  it("keeps the lines above a dangling opening delimiter byte for byte", () => {
+    const foreign = 'PATH=/usr/bin\n# theirs\n7 7 * * 7 /usr/local/bin/weekly.sh\n';
+    const interrupted = `${foreign}${MANAGED_BEGIN}\n0 1 * * * /opt/scriptoria/scripts/x.sh\n`;
+
+    const after = writeManagedBlock(interrupted, [
+      { expression: "0 2 * * *", command: "/opt/scriptoria/scripts/y.sh", enabled: true },
+    ]);
+
+    expect(after.startsWith(foreign)).toBe(true);
+    expect(after).not.toContain("/opt/scriptoria/scripts/x.sh");
+    expect(managedJobs(parseCrontab(after))).toEqual([
+      { expression: "0 2 * * *", command: "/opt/scriptoria/scripts/y.sh", enabled: true },
+    ]);
+  });
 });
