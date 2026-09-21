@@ -9,8 +9,16 @@ const encoded = KEY.toString("base64");
 describe("parseKnownHosts", () => {
   it("reads a plain entry", () => {
     const [entry] = parseKnownHosts(`script-vm ssh-ed25519 ${encoded} comment\n`);
-    expect(entry?.hosts).toEqual(["script-vm"]);
+    expect(entry?.patterns).toEqual([{ negated: false, pattern: "script-vm", hashed: null }]);
     expect(entry?.key).toBe(encoded);
+  });
+
+  it("reads a pattern list, negation included", () => {
+    const [entry] = parseKnownHosts(`!vm1.example.com,vm*.example.com ssh-ed25519 ${encoded}\n`);
+    expect(entry?.patterns.map((pattern) => [pattern.negated, pattern.pattern])).toEqual([
+      [true, "vm1.example.com"],
+      [false, "vm*.example.com"],
+    ]);
   });
 
   it("skips comments and blank lines", () => {
@@ -60,6 +68,57 @@ describe("isKnownHostKey", () => {
     // The failure mode that matters: no pins must mean no connections, not all
     // of them.
     expect(isKnownHostKey([], "script-vm", 22, KEY)).toBe(false);
+  });
+
+  it("matches a wildcard host field", () => {
+    // How an estate of script VMs is actually pinned: one line for the set.
+    // Read as an exact string, this entry never matches and every run against
+    // those VMs is refused.
+    const entries = parseKnownHosts(`*.example.com ssh-ed25519 ${encoded}\n`);
+
+    expect(isKnownHostKey(entries, "vm1.example.com", 22, KEY)).toBe(true);
+    expect(isKnownHostKey(entries, "script-vm.a.example.com", 22, KEY)).toBe(true);
+    expect(isKnownHostKey(entries, "other.test", 22, KEY)).toBe(false);
+  });
+
+  it("matches a single character with ?", () => {
+    const entries = parseKnownHosts(`vm?.example.com ssh-ed25519 ${encoded}\n`);
+
+    expect(isKnownHostKey(entries, "vm1.example.com", 22, KEY)).toBe(true);
+    expect(isKnownHostKey(entries, "vm12.example.com", 22, KEY)).toBe(false);
+  });
+
+  it("does not read a regex out of a host field", () => {
+    // The patterns are globs, not regular expressions: a pin full of dots names
+    // one host, and a bracket is a bracket.
+    const dotted = parseKnownHosts(`10.0.0.7 ssh-ed25519 ${encoded}\n`);
+    expect(isKnownHostKey(dotted, "10x0y0z7", 22, KEY)).toBe(false);
+    expect(isKnownHostKey(dotted, "10.0.0.7", 22, KEY)).toBe(true);
+
+    const bracketed = parseKnownHosts(`vm[1].example.com ssh-ed25519 ${encoded}\n`);
+    expect(isKnownHostKey(bracketed, "vm1.example.com", 22, KEY)).toBe(false);
+    expect(isKnownHostKey(bracketed, "vm[1].example.com", 22, KEY)).toBe(true);
+  });
+
+  it("honours a negated element", () => {
+    // "That estate, except this one": the excluded host must not match, and the
+    // rest of the list must still work.
+    const entries = parseKnownHosts(`!vm1.example.com,*.example.com ssh-ed25519 ${encoded}\n`);
+
+    expect(isKnownHostKey(entries, "vm1.example.com", 22, KEY)).toBe(false);
+    expect(isKnownHostKey(entries, "vm2.example.com", 22, KEY)).toBe(true);
+  });
+
+  it("keeps a negation scoped to its own line", () => {
+    const entries = parseKnownHosts(
+      `!vm1.example.com,*.example.com ssh-ed25519 ${encoded}\n` +
+        `vm1.example.com ssh-ed25519 ${OTHER.toString("base64")}\n`,
+    );
+
+    // The first line excludes vm1, and the second pins it with another key, so
+    // exactly one of the two keys is accepted for that host.
+    expect(isKnownHostKey(entries, "vm1.example.com", 22, KEY)).toBe(false);
+    expect(isKnownHostKey(entries, "vm1.example.com", 22, OTHER)).toBe(true);
   });
 });
 
