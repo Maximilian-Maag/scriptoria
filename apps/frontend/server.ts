@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import next from "next";
 import { loadEnvFile, loadFrontendConfig } from "@scriptoria/config";
+import { clientAddressFor } from "./src/lib/http/clientAddress";
 
 /**
  * The frontend's entrypoint.
@@ -21,6 +22,22 @@ const handle = app.getRequestHandler();
 await app.prepare();
 
 const server = createServer((request, response) => {
+  // FA-12.1's "where" is settled here, before Next sees the request, because
+  // this is the last point at which the socket the request arrived on is still
+  // visible. `x-forwarded-for` is *replaced* rather than forwarded: the proxy
+  // route and the control plane behind it can only read headers, so whatever is
+  // left here is what the audit trail records, and a client-supplied value is not
+  // an address. `x-real-ip` is dropped for the same reason — nothing sets it in
+  // this deployment, and anything that arrives on it was written by the caller.
+  const clientAddress = clientAddressFor(
+    request.headers["x-forwarded-for"],
+    request.socket.remoteAddress,
+    { trustedReverseProxy: config.TRUSTED_REVERSE_PROXY },
+  );
+  if (clientAddress === null) delete request.headers["x-forwarded-for"];
+  else request.headers["x-forwarded-for"] = clientAddress;
+  delete request.headers["x-real-ip"];
+
   void handle(request, response);
 });
 
