@@ -17,10 +17,20 @@ import { remotePathSchema } from "./common";
 export const criticalitySchema = z.enum(["read-only", "modifying", "unknown"]);
 export type Criticality = z.infer<typeof criticalitySchema>;
 
+/**
+ * The caps the contract and the parser share.
+ *
+ * They are exported because the parser has to respect them: a header longer than
+ * its own contract allows is a header the catalog drops entirely, and the one
+ * value that must survive a long title is the criticality next to it.
+ */
+export const SCRIPT_TITLE_MAX_LENGTH = 200;
+export const SCRIPT_DESCRIPTION_MAX_LENGTH = 4_000;
+
 /** What the header block declared, exactly as parsed. Every key is optional. */
 export const scriptHeaderSchema = z.object({
-  title: z.string().trim().max(200).optional(),
-  description: z.string().trim().max(4000).optional(),
+  title: z.string().trim().max(SCRIPT_TITLE_MAX_LENGTH).optional(),
+  description: z.string().trim().max(SCRIPT_DESCRIPTION_MAX_LENGTH).optional(),
   criticality: criticalitySchema.optional(),
   interactive: z.boolean().optional(),
   /** Where this script says its results land, if it says so. */
