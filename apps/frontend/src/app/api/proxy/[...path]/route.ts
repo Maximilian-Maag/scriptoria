@@ -27,6 +27,13 @@ export const dynamic = "force-dynamic";
  * bytes that are no longer gzipped. A browser that honours it fails to decode
  * the response at all, which is how a result file arrives as
  * `ERR_CONTENT_DECODING_FAILED` rather than as a download.
+ *
+ * Deliberately *not* here: `x-forwarded-for` and `x-real-ip`. They look like they
+ * belong in a list of headers not to be taken from a client, but the frontend's
+ * server has already replaced them with the address it saw the request arrive
+ * from (see `src/lib/http/clientAddress.ts`), and stripping them here would throw
+ * that address away. Adding them to this set re-opens FA-12.1's "where" to
+ * whatever the browser wants it to say.
  */
 const STRIPPED = new Set([
   "connection",
