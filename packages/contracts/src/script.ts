@@ -79,6 +79,17 @@ export const scriptSchema = z.object({
   modifiedAt: z.string().datetime({ offset: true }).nullable(),
   /** When the scanner last read this file's header. */
   scannedAt: z.string().datetime({ offset: true }),
+
+  /**
+   * FA-03.3: whether the newest scan of this script's source still found it.
+   *
+   * A script that has gone from the script VM is kept rather than deleted — its
+   * run history references it, and FA-12 wants that history readable — so the
+   * catalog has to be able to say which of its entries are still there. `false`
+   * means the file is gone: the entry stays visible as vanished, and a run cannot
+   * be started from it.
+   */
+  present: z.boolean(),
 });
 export type Script = z.infer<typeof scriptSchema>;
 
