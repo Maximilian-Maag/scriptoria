@@ -1,6 +1,6 @@
 import { updateAreaRequestSchema } from "@scriptoria/contracts";
 import { deleteArea, getArea, updateArea } from "@/lib/services/areaService";
-import { clientIp, parseBody, requireRoot } from "@/lib/http";
+import { clientIp, parseBody, parsePath, requireRoot } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +13,8 @@ export async function GET(
   if (!session.ok) return toResponse(session);
 
   const { areaId } = await params;
+  const path = parsePath({ areaId });
+  if (!path.ok) return toResponse(path);
   return toResponse(await getArea(areaId));
 }
 
@@ -27,6 +29,8 @@ export async function PATCH(
   if (!body.ok) return toResponse(body);
 
   const { areaId } = await params;
+  const path = parsePath({ areaId });
+  if (!path.ok) return toResponse(path);
   return toResponse(
     await updateArea(session.value, areaId, body.value, { sourceIp: clientIp(request) }),
   );
@@ -44,5 +48,7 @@ export async function DELETE(
   if (!session.ok) return toResponse(session);
 
   const { areaId } = await params;
+  const path = parsePath({ areaId });
+  if (!path.ok) return toResponse(path);
   return toResponse(await deleteArea(session.value, areaId, { sourceIp: clientIp(request) }));
 }

@@ -1,5 +1,5 @@
 import { revokeEntitlement } from "@/lib/services/areaService";
-import { clientIp, requireRoot } from "@/lib/http";
+import { clientIp, parsePath, requireRoot } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +17,8 @@ export async function DELETE(
   if (!session.ok) return toResponse(session);
 
   const { areaId, entitlementId } = await params;
+  const path = parsePath({ areaId, entitlementId });
+  if (!path.ok) return toResponse(path);
   return toResponse(
     await revokeEntitlement(session.value, areaId, entitlementId, {
       sourceIp: clientIp(request),

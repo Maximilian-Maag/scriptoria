@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { parseOptionalBody } from "../src/lib/http";
+import { parseOptionalBody, parsePath } from "../src/lib/http";
 
 /**
  * FA-08.3 / ADR-003, at the layer that got it wrong: a read-only script is
@@ -112,9 +112,47 @@ describe("parseOptionalBody", () => {
 });
 
 /**
- * And the same thing through the route that had the bug: a bodyless DELETE on a
- * run has to reach the service, because that is what the no-confirmation abort
- * of a read-only script *is*.
+ * FA-02's "the control plane answers in one shape", for the input that had no
+ * validation at all: the path segment.
+ *
+ * A non-UUID `{runId}` reached Postgres as a `uuid` comparison and came back
+ * `22P02 invalid input syntax for type uuid` — a 500 with an empty body, from a
+ * typo, on a route any signed-in account can reach.
+ */
+describe("parsePath", () => {
+  it("rejects a segment that cannot be an id, and names it", () => {
+    const path = parsePath({ runId: "not-a-uuid" });
+
+    expect(path.ok).toBe(false);
+    expect(!path.ok && path.code).toBe("validation_failed");
+    expect(!path.ok && path.details?.[0]?.path).toBe("runId");
+    expect(!path.ok && path.details?.[0]?.message).toBe("Must be a UUID");
+  });
+
+  it("names the offending segment when a path carries several ids", () => {
+    const path = parsePath({
+      areaId: "00000000-0000-4000-8000-000000000001",
+      entitlementId: "nope",
+    });
+
+    expect(path.ok).toBe(false);
+    expect(!path.ok && path.details?.[0]?.path).toBe("entitlementId");
+  });
+
+  it("passes a well-formed path through unchanged", () => {
+    const areaId = "00000000-0000-4000-8000-000000000001";
+    const sourceId = "00000000-0000-4000-8000-000000000002";
+
+    const path = parsePath({ areaId, sourceId });
+
+    expect(path.ok).toBe(true);
+    expect(path.ok && path.value).toEqual({ areaId, sourceId });
+  });
+});
+
+/**
+ * And the same thing through the route handler: a malformed id is the caller's
+ * mistake, answered in the envelope, and never reaches a service.
  */
 const { abortRun, readSession } = vi.hoisted(() => ({
   abortRun: vi.fn(),
@@ -125,6 +163,9 @@ vi.mock("@/lib/services/runService", () => ({ abortRun, getRun: vi.fn() }));
 vi.mock("@/lib/auth/session", () => ({ readSession }));
 
 describe("DELETE /api/runs/{runId}", () => {
+  /** An id the path guard accepts, so the test is about the body, not the path. */
+  const RUN_ID = "00000000-0000-4000-8000-000000000009";
+
   const SESSION = {
     id: "session-1",
     username: "admin.branch",
@@ -141,14 +182,34 @@ describe("DELETE /api/runs/{runId}", () => {
 
     const { DELETE } = await import("../src/app/api/runs/[runId]/route");
     const response = await DELETE(
-      new Request("http://backend.test/api/runs/run-1", { method: "DELETE" }),
-      { params: Promise.resolve({ runId: "run-1" }) },
+      new Request(`http://backend.test/api/runs/${RUN_ID}`, { method: "DELETE" }),
+      { params: Promise.resolve({ runId: RUN_ID }) },
     );
 
     expect(abortRun).toHaveBeenCalledTimes(1);
-    expect(abortRun.mock.calls[0]?.[1]).toBe("run-1");
+    expect(abortRun.mock.calls[0]?.[1]).toBe(RUN_ID);
     expect(abortRun.mock.calls[0]?.[2]).toEqual({});
     expect(response.status).toBe(204);
+  });
+
+  it("answers a malformed id in the envelope instead of reaching the service", async () => {
+    readSession.mockResolvedValue(SESSION);
+    abortRun.mockClear();
+
+    const { DELETE, GET } = await import("../src/app/api/runs/[runId]/route");
+    const params = { params: Promise.resolve({ runId: "not-a-uuid" }) };
+
+    const aborted = await DELETE(
+      new Request("http://backend.test/api/runs/not-a-uuid", { method: "DELETE" }),
+      params,
+    );
+    expect(aborted.status).toBe(422);
+    expect(abortRun).not.toHaveBeenCalled();
+
+    const read = await GET(new Request("http://backend.test/api/runs/not-a-uuid"), params);
+    const body = (await read.json()) as { error?: { code?: string } };
+    expect(read.status).toBe(422);
+    expect(body.error?.code).toBe("validation_failed");
   });
 
   it("still refuses a body that is not JSON", async () => {
@@ -157,12 +218,12 @@ describe("DELETE /api/runs/{runId}", () => {
 
     const { DELETE } = await import("../src/app/api/runs/[runId]/route");
     const response = await DELETE(
-      new Request("http://backend.test/api/runs/run-1", {
+      new Request(`http://backend.test/api/runs/${RUN_ID}`, {
         method: "DELETE",
         body: "{oops",
         headers: { "content-type": "application/json" },
       }),
-      { params: Promise.resolve({ runId: "run-1" }) },
+      { params: Promise.resolve({ runId: RUN_ID }) },
     );
 
     expect(response.status).toBe(422);
