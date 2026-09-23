@@ -28,6 +28,46 @@ export async function parseBody<S extends z.ZodTypeAny>(
   return { ok: true, value: parsed.data };
 }
 
+/**
+ * A body that is allowed to be absent.
+ *
+ * ADR-003: a read-only script is stopped by the request itself, so the abort
+ * request carries nothing at all — and an empty request is not a malformed one.
+ * `request.json()` cannot tell those two apart, because a request with no body
+ * still arrives as an empty *stream*: it throws, and a read-only abort comes
+ * back as "the request body is not valid JSON" with the abort never attempted.
+ * So the body is read as text, and a blank one is parsed as an empty object —
+ * still through the schema, so a body that is required can still be refused.
+ */
+export async function parseOptionalBody<S extends z.ZodTypeAny>(
+  request: Request,
+  schema: S,
+): Promise<Result<z.infer<S>>> {
+  let text: string;
+  try {
+    text = await request.text();
+  } catch {
+    return err("validation_failed", "The request body could not be read");
+  }
+
+  if (text.trim() === "") {
+    const empty = schema.safeParse({});
+    if (!empty.success) return validationFailed(empty.error.issues);
+    return { ok: true, value: empty.data };
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return err("validation_failed", "The request body is not valid JSON");
+  }
+
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) return validationFailed(parsed.error.issues);
+  return { ok: true, value: parsed.data };
+}
+
 export function parseQuery<S extends z.ZodTypeAny>(request: Request, schema: S): Result<z.infer<S>> {
   const params = Object.fromEntries(new URL(request.url).searchParams.entries());
   const parsed = schema.safeParse(params);
