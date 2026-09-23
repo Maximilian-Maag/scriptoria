@@ -1,6 +1,6 @@
 import { createScriptSourceRequestSchema } from "@scriptoria/contracts";
 import { addSource } from "@/lib/services/areaService";
-import { clientIp, parseBody, requireRoot } from "@/lib/http";
+import { clientIp, parseBody, parsePath, requireRoot } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +17,8 @@ export async function POST(
   if (!body.ok) return toResponse(body);
 
   const { areaId } = await params;
+  const path = parsePath({ areaId });
+  if (!path.ok) return toResponse(path);
   return toResponse(
     await addSource(session.value, areaId, body.value, { sourceIp: clientIp(request) }),
     { status: 201 },

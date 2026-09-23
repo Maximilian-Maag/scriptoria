@@ -1,6 +1,6 @@
 import { updateScheduleRequestSchema } from "@scriptoria/contracts";
 import { updateSchedule } from "@/lib/services/scheduleService";
-import { clientIp, parseBody, requireRoot } from "@/lib/http";
+import { clientIp, parseBody, parsePath, requireRoot } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +28,8 @@ export async function PATCH(
   if (!body.ok) return toResponse(body);
 
   const { scheduleId } = await params;
+  const path = parsePath({ scheduleId });
+  if (!path.ok) return toResponse(path);
   return toResponse(
     await updateSchedule(session.value, scheduleId, body.value, { sourceIp: clientIp(request) }),
   );

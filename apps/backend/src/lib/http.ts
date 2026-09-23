@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { uuidSchema } from "@scriptoria/contracts";
 import { readSession, type Session } from "./auth/session";
 import { err, forbidden, unauthenticated, validationFailed, type Result } from "./result";
 import { loadBackendConfig } from "@scriptoria/config";
@@ -73,6 +74,34 @@ export function parseQuery<S extends z.ZodTypeAny>(request: Request, schema: S):
   const parsed = schema.safeParse(params);
   if (!parsed.success) return validationFailed(parsed.error.issues);
   return { ok: true, value: parsed.data };
+}
+
+/**
+ * The ids a route's path carries, validated — the third of the three inputs a
+ * handler takes, next to the body and the query.
+ *
+ * Every id in this API is a UUID, and a segment that is not one cannot name a
+ * row: handed to Postgres it raises `22P02 invalid input syntax for type uuid`,
+ * which arrived as a **500 with an empty body** — the error envelope broken, in
+ * the one shape `packages/contracts` promises never happens, on routes any
+ * signed-in account can reach with a typo.
+ *
+ * So a route validates its path the way it validates everything else for a
+ * caller to fix:
+ *
+ * ```ts
+ * const { runId } = await params;
+ * const path = parsePath({ runId });
+ * if (!path.ok) return toResponse(path);
+ * ```
+ */
+export function parsePath<T extends Record<string, string>>(ids: T): Result<T> {
+  for (const [name, value] of Object.entries(ids)) {
+    if (!uuidSchema.safeParse(value).success) {
+      return validationFailed([{ path: [name], message: "Must be a UUID" }]);
+    }
+  }
+  return { ok: true, value: ids };
 }
 
 export function sessionIdFrom(request: Request): string | undefined {

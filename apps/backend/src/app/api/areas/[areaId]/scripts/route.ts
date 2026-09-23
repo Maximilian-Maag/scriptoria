@@ -1,5 +1,5 @@
 import { listScripts, refresh } from "@/lib/services/catalogService";
-import { requireSession } from "@/lib/http";
+import { parsePath, requireSession } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +13,8 @@ export async function GET(
   if (!session.ok) return toResponse(session);
 
   const { areaId } = await params;
+  const path = parsePath({ areaId });
+  if (!path.ok) return toResponse(path);
   return toResponse(await listScripts(session.value, areaId));
 }
 
@@ -28,5 +30,7 @@ export async function POST(
   if (!session.ok) return toResponse(session);
 
   const { areaId } = await params;
+  const path = parsePath({ areaId });
+  if (!path.ok) return toResponse(path);
   return toResponse(await refresh(session.value, areaId));
 }
