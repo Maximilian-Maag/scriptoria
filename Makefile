@@ -26,7 +26,7 @@ help:
 	@echo "  lint                  lint all apps and packages"
 	@echo "  type-check            TypeScript type-check everything"
 	@echo "  test                  run unit and integration tests"
-	@echo "  test-e2e              run the Playwright end-to-end suite (requires a live stack)"
+	@echo "  test-e2e              run the Playwright end-to-end suite (needs a live stack: make dev)"
 	@echo "  test-db               create the test and e2e databases in the running Postgres"
 	@echo "  test-db-prune         drop the per-directory test databases"
 	@echo "  db-check              fail if schema.ts and the migrations disagree"
@@ -76,7 +76,7 @@ lint:
 	$(PNPM) lint
 
 type-check:
-	$(PNPM) --parallel --filter './apps/*' --filter './packages/*' exec tsc --noEmit
+	$(PNPM) --parallel --filter './apps/*' --filter './packages/*' --filter e2e exec tsc --noEmit
 
 test:
 	$(PNPM) --filter backend test
@@ -84,8 +84,23 @@ test:
 	$(PNPM) --filter frontend test
 	$(PNPM) --filter '@scriptoria/*' test
 
-test-e2e:
-	$(PNPM) test:e2e
+# ── End-to-end ────────────────────────────────────────────────────────────────
+# The suite drives the real interface against the real stack. It needs postgres,
+# redis, the directory fixture and the script-VM fixture up — `make dev` — and
+# nothing else: Playwright starts the frontend, the backend and the runner
+# itself, so a stale build already listening on :3000 cannot be what the suite
+# reports on.
+#
+# It runs against its own database rather than the one `make run` uses, so a
+# suite run cannot rewrite the area an operator is looking at, and so the state
+# it asserts on is the state its own migrate-and-seed put there.
+E2E_DATABASE_URL ?= postgres://postgres:postgres@localhost:5433/scriptoria_e2e
+
+test-e2e: test-db
+	@echo "  e2e database: $(E2E_DATABASE_URL)"
+	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) --filter @scriptoria/db db:migrate
+	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) --filter @scriptoria/db db:seed
+	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) test:e2e
 
 # The backend suite creates its own database on first run — one per working
 # directory, so two runs cannot truncate each other's tables. This target only
