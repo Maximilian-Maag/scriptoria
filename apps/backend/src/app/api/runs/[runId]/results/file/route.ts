@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { downloadResult } from "@/lib/services/resultService";
-import { clientIp, parseQuery, requireSession } from "@/lib/http";
+import { clientIp, parsePath, parseQuery, requireSession } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +26,8 @@ export async function GET(
   if (!query.ok) return toResponse(query);
 
   const { runId } = await params;
+  const path = parsePath({ runId });
+  if (!path.ok) return toResponse(path);
   const result = await downloadResult(session.value, runId, query.value.path, {
     sourceIp: clientIp(request),
   });

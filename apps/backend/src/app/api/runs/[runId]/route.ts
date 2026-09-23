@@ -1,6 +1,6 @@
 import { abortRunRequestSchema } from "@scriptoria/contracts";
 import { abortRun, getRun } from "@/lib/services/runService";
-import { clientIp, parseOptionalBody, requireSession } from "@/lib/http";
+import { clientIp, parseOptionalBody, parsePath, requireSession } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,8 @@ export async function GET(
   if (!session.ok) return toResponse(session);
 
   const { runId } = await params;
+  const path = parsePath({ runId });
+  if (!path.ok) return toResponse(path);
   return toResponse(await getRun(session.value, runId));
 }
 
@@ -37,6 +39,8 @@ export async function DELETE(
   if (!body.ok) return toResponse(body);
 
   const { runId } = await params;
+  const path = parsePath({ runId });
+  if (!path.ok) return toResponse(path);
   return toResponse(
     await abortRun(session.value, runId, body.value, { sourceIp: clientIp(request) }),
   );

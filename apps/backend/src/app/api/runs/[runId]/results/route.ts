@@ -1,5 +1,5 @@
 import { listResults } from "@/lib/services/resultService";
-import { requireSession } from "@/lib/http";
+import { parsePath, requireSession } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -18,5 +18,7 @@ export async function GET(
   if (!session.ok) return toResponse(session);
 
   const { runId } = await params;
+  const path = parsePath({ runId });
+  if (!path.ok) return toResponse(path);
   return toResponse(await listResults(session.value, runId));
 }

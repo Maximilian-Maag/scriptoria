@@ -1,6 +1,6 @@
 import { resultArchiveRequestSchema } from "@scriptoria/contracts";
 import { archiveResults } from "@/lib/services/resultService";
-import { clientIp, parseBody, requireSession } from "@/lib/http";
+import { clientIp, parseBody, parsePath, requireSession } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +30,8 @@ export async function POST(
   if (!body.ok) return toResponse(body);
 
   const { runId } = await params;
+  const path = parsePath({ runId });
+  if (!path.ok) return toResponse(path);
   const result = await archiveResults(session.value, runId, body.value, {
     sourceIp: clientIp(request),
   });

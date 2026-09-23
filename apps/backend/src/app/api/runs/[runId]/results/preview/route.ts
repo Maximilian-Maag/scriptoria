@@ -1,6 +1,6 @@
 import { resultPreviewQuerySchema } from "@scriptoria/contracts";
 import { previewResult } from "@/lib/services/resultService";
-import { parseQuery, requireSession } from "@/lib/http";
+import { parsePath, parseQuery, requireSession } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -27,5 +27,7 @@ export async function GET(
   if (!query.ok) return toResponse(query);
 
   const { runId } = await params;
+  const path = parsePath({ runId });
+  if (!path.ok) return toResponse(path);
   return toResponse(await previewResult(session.value, runId, query.value));
 }
