@@ -20,19 +20,47 @@ import { describeError, log } from "../log";
 
 export type StageListener = (stage: AbortStage) => void | Promise<void>;
 
+/**
+ * What a stop request did, because "asked" and "acted on" are two different
+ * facts and the run's outcome depends on the second one (FA-08.1).
+ */
+export type AbortRequestOutcome =
+  /** Acted on: a process that was still there is being asked to stop. */
+  | "requested"
+  /** A second click while the escalation is already under way. Changes nothing. */
+  | "already_requested"
+  /** The script had already exited. Nothing was signalled, and nothing will be. */
+  | "too_late";
+
 export class StagedAbort {
   private requested = false;
   private reachedStage: AbortStage | null = null;
+  private exited = false;
 
   constructor(
     private readonly runId: string,
     private readonly script: RunningScript,
     private readonly onStage: StageListener,
-  ) {}
+  ) {
+    // Watched rather than awaited: whether the process is still there decides
+    // what a stop request may do, and that answer has to be available at the
+    // moment the request arrives.
+    void script.exit.then(() => {
+      this.exited = true;
+    });
+  }
 
-  /** True once an abort has been asked for — this is what makes the run `aborted`. */
-  get wasRequested(): boolean {
-    return this.requested;
+  /**
+   * True once a signal was actually sent, to a process that was still there.
+   *
+   * This — not the request — is what makes a run `aborted`. An operator who
+   * pressed stop a moment after the script finished did not stop it, and a run
+   * that exited 0 did not fail because somebody asked afterwards: FA-10.2's
+   * *last successful* would be rewritten by a late click, which is a lie about
+   * the script, and ADR-003 reserves `aborted` for a run a human really stopped.
+   */
+  get wasSignalled(): boolean {
+    return this.reachedStage !== null;
   }
 
   /** How far the escalation actually had to go. Null when nothing was signalled. */
@@ -44,11 +72,19 @@ export class StagedAbort {
    * Idempotent: a second request while the escalation is running changes
    * nothing. An operator clicking stop twice is an operator who wants it to
    * stop, not one who wants it killed sooner.
+   *
+   * Inert once the process is gone, and that is why this reports what it did
+   * rather than returning nothing. The pid file outlives the script until the
+   * run is wound up, so `kill -INT -<pid>` here still finds a process group —
+   * and signals whatever else was left in it, after the run is over and the only
+   * thing left to do with the outcome is to record it.
    */
-  request(): void {
-    if (this.requested) return;
+  request(): AbortRequestOutcome {
+    if (this.exited) return "too_late";
+    if (this.requested) return "already_requested";
     this.requested = true;
     void this.escalate();
+    return "requested";
   }
 
   private async escalate(): Promise<void> {
@@ -60,6 +96,11 @@ export class StagedAbort {
     ];
 
     for (const [stage, graceMs] of stages) {
+      // Re-checked per stage rather than once at the door: the process can go
+      // between the request and the signal, and a script that finishes on its
+      // own while a stop is in flight must be recorded as the run it was.
+      if (this.exited) return;
+
       try {
         await this.script.signal(stage);
         this.reachedStage = stage;
