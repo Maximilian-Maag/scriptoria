@@ -55,12 +55,44 @@ export function isPreviewable(fileName: string, sizeBytes: number): boolean {
 }
 
 /**
+ * A file name reduced to the character set a response header and a ZIP entry
+ * are both unambiguously safe in: ASCII letters, digits, dot, underscore and
+ * hyphen, everything else a hyphen.
+ *
+ * FA-09.2 / FA-09.3. A result file name is whatever SFTP reported from the
+ * script VM, and `fileNameSchema` forbids `/`, `.` and `..` and nothing else —
+ * a newline is a legal file name there. A newline makes a header value invalid
+ * and `Headers` **throws** on one rather than rendering it, so without this a
+ * single planted name turns its download, and the run's whole ZIP, into a 500.
+ * Anything outside Latin-1 throws the same way. One rule, applied wherever a
+ * name reaches a header or an archive, so a name and its archive entry agree.
+ */
+export function sanitiseFileName(fileName: string): string {
+  return fileName.replace(/[^A-Za-z0-9._-]/g, "-");
+}
+
+/**
+ * The same treatment for a path *inside* an archive. A ZIP entry is a path, not
+ * a name, so the separators are kept and each segment is sanitised by the one
+ * rule above — collapsing the slashes would flatten a result set's directories
+ * into a single level.
+ */
+export function sanitiseArchiveEntry(path: string): string {
+  return path.split("/").map(sanitiseFileName).join("/");
+}
+
+/**
  * The name a downloaded ZIP gets. Date-stamped like the export directories the
  * scripts write into, so a downloaded set and the set on the VM can be matched
  * up by eye.
+ *
+ * The base goes through the sanitiser for the same reason a file name does: the
+ * name comes from the script VM and becomes a response header. The fallback is
+ * for a script name that leaves nothing behind once its extension is dropped
+ * (`.sh`), which would otherwise name the file after the stamp alone.
  */
 export function archiveFileName(scriptFileName: string, startedAt: Date): string {
-  const base = scriptFileName.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9._-]/g, "-");
+  const base = sanitiseFileName(scriptFileName.replace(/\.[^.]+$/, "")) || "results";
   const stamp = startedAt.toISOString().slice(0, 19).replace(/[:T]/g, "-");
   return `${base}-${stamp}.zip`;
 }
