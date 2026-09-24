@@ -10,8 +10,8 @@
  * carefully as on the presence of content.
  */
 import { expect, test } from "../src/test";
-import { ACCOUNTS, GROUPS, REFERENCE_AREA } from "../src/env";
-import { appAlerts, apiGet, areasFor, attemptSignIn, signIn, signOut } from "../src/ui";
+import { ACCOUNTS, GROUPS, REFERENCE_AREA, SCRIPTS } from "../src/env";
+import { appAlerts, apiGet, areasFor, attemptSignIn, openArea, signIn, signOut } from "../src/ui";
 
 test.describe("signing in with a directory account (FA-01)", () => {
   test("an entitled administrator signs in and lands on the empty dashboard (FA-01.1, FA-03.6)", async ({
@@ -53,7 +53,9 @@ test.describe("signing in with a directory account (FA-01)", () => {
     await signIn(page, ACCOUNTS.none);
 
     await expect(page.getByText("No areas yet")).toBeVisible();
-    await expect(page.getByText(/none of its directory groups is entitled to an area/)).toBeVisible();
+    await expect(
+      page.getByText(/none of its directory groups is entitled to an area/),
+    ).toBeVisible();
 
     // The load-bearing half: an empty screen must not be rendered as a fault.
     // Nothing to retry, nobody to escalate to, no error anywhere on the page.
@@ -62,6 +64,38 @@ test.describe("signing in with a directory account (FA-01)", () => {
 
     const areas = await areasFor(page);
     expect(areas).toEqual([]);
+  });
+
+  test("the groups the account holds in the directory are assigned to the session, and the areas they release with them (FA-01.3)", async ({
+    page,
+  }) => {
+    // FA-01.3 is the assignment itself, and it is the directory's answer rather
+    // than anything local: what the session carries are the groups this account
+    // actually holds there. FA-02.2 (below) covers the other half — that the
+    // assignment is redone at every login rather than kept.
+    await signIn(page, ACCOUNTS.branch);
+
+    const session = await apiGet<{ user: { groups: string[]; areaIds: string[] } }>(
+      page,
+      "/auth/session",
+    );
+
+    expect(
+      session.user.groups.some((group) => group.includes(GROUPS.branchNetwork)),
+      `the session must carry ${GROUPS.branchNetwork}, and carried: ${session.user.groups.join(", ")}`,
+    ).toBe(true);
+
+    // The second half of FA-01.3 — "so that the areas released to those groups
+    // become usable" — is that the entitlement resolves *through* the group:
+    // the area the group is released to is the session's without anything else
+    // being granted to the account.
+    const reference = (await areasFor(page)).find((area) => area.name === REFERENCE_AREA.name);
+    expect(reference, `the area released to ${GROUPS.branchNetwork} must be usable`).toBeTruthy();
+    expect(session.user.areaIds).toContain(reference!.id);
+
+    // Usable means reachable, not merely listed.
+    await openArea(page, REFERENCE_AREA.name);
+    await expect(page.getByText(SCRIPTS.inventory.fileName)).toBeVisible();
   });
 
   test("the entitlements are rebuilt from the directory at every login (FA-02.2)", async ({

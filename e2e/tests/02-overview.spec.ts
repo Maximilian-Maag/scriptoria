@@ -6,8 +6,40 @@
  * selection is the first of two clicks rather than the start itself.
  */
 import { expect, test } from "../src/test";
-import { ACCOUNTS, REFERENCE_AREA, SCRIPTS } from "../src/env";
-import { apiGet, areaIdFor, openArea, selectScript, signIn } from "../src/ui";
+import type { Browser, Page } from "@playwright/test";
+import { ACCOUNTS, BASE_URL, REFERENCE_AREA, SCRIPTS } from "../src/env";
+import { apiDelete, apiGet, apiPost, areaIdFor, openArea, selectScript, signIn } from "../src/ui";
+
+/**
+ * The second area FA-03.2 needs. Every area in this suite points at the same
+ * script VM and the same directory (FA-11.2), because what is under test here
+ * is the moving between areas rather than what each one contains.
+ */
+const SOURCE = {
+  host: "localhost",
+  port: 2222,
+  username: "svc.scripts",
+  scriptPath: "/opt/scriptoria/scripts",
+  outputPath: "/opt/scriptoria/export",
+};
+
+/** A second browser, so root can create the area while branch is looking. */
+async function newSession(
+  browser: Browser,
+  account: { username: string; password: string },
+): Promise<Page> {
+  const context = await browser.newContext({ baseURL: BASE_URL });
+  const page = await context.newPage();
+  await signIn(page, account);
+  return page;
+}
+
+/** Removes the area this file created, so a re-run does not accumulate them. */
+async function removeAreaByName(page: Page, name: string): Promise<void> {
+  const areas = await apiGet<Array<{ id: string; name: string }>>(page, "/admin/areas");
+  const leftover = areas.find((area) => area.name === name);
+  if (leftover) await apiDelete(page, `/admin/areas/${leftover.id}`);
+}
 
 test.describe("the area and script overview (FA-03), and selection (FA-04)", () => {
   test.beforeEach(async ({ page }) => {
@@ -92,6 +124,55 @@ test.describe("the area and script overview (FA-03), and selection (FA-04)", () 
     await selectScript(page, SCRIPTS.inventory.fileName);
     await expect(page.getByRole("button", { name: "Start this script" })).toBeEnabled();
     await expect(page.locator("aside")).not.toContainText("most recent scan did not find");
+  });
+
+  test("an administrator navigates between areas to select scripts (FA-03.2)", async ({
+    page,
+    browser,
+  }) => {
+    // The fixture seeds one area, and FA-03.2 is about the *navigation*: two
+    // areas, and moving between them. The second is created the way root creates
+    // one (FA-11.1–FA-11.3) and entitled to the group this account holds, so
+    // that both areas are its — and taken back afterwards, which a seeded area
+    // could not be.
+    const second = `E2E navigation ${Date.now().toString(36)}`;
+    const asRoot = await newSession(browser, ACCOUNTS.root);
+
+    try {
+      const created = await apiPost<{ id: string }>(asRoot, "/admin/areas", {
+        name: second,
+        description: "Created by the end-to-end suite to have a second area to move to.",
+        category: "one-off",
+      });
+      await apiPost(asRoot, `/admin/areas/${created.id}/sources`, SOURCE);
+      await apiPost(asRoot, `/admin/areas/${created.id}/entitlements`, {
+        directoryGroup: REFERENCE_AREA.directoryGroup,
+      });
+
+      // The area was entitled after this session was created, and the navigation
+      // is rendered from the entitlements re-resolved per request (NFR-03) — so
+      // the page is reloaded, which is what an administrator arriving later
+      // does. Both areas are now the account's.
+      await page.reload();
+      await expect(page.getByRole("link", { name: REFERENCE_AREA.name })).toBeVisible();
+      await expect(page.getByRole("link", { name: second })).toBeVisible();
+
+      // Across to the second area…
+      await openArea(page, second);
+      await expect(page).toHaveURL(new RegExp(`/areas/${created.id}$`));
+      await expect(page.getByText(SCRIPTS.inventory.fileName)).toBeVisible();
+
+      // …and back to the first, which is the "between" in FA-03.2. The area the
+      // page is showing changed with the click, not with a sign-in.
+      await openArea(page, REFERENCE_AREA.name);
+      await expect(page).toHaveURL(
+        new RegExp(`/areas/${await areaIdFor(page, REFERENCE_AREA.name)}$`),
+      );
+      await expect(page.getByText(SCRIPTS.inventory.fileName)).toBeVisible();
+    } finally {
+      await removeAreaByName(asRoot, second);
+      await asRoot.close();
+    }
   });
 
   test("an area holds scripts, its runs and its schedules as separate views (FA-03.3)", async ({
