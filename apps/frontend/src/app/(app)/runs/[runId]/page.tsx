@@ -46,9 +46,17 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
    * must never both be used: a run watched from its start has every byte from
    * the socket already, and writing the transcript in afterwards would print
    * the whole run a second time under itself.
+   *
+   * It is decided once, and from a *settled* answer rather than from whatever
+   * the cache happens to be holding. The cache is not empty on the way back: an
+   * operator who watched this run start, left the console and returned to it
+   * opens this page on the record of a run that was still running, and a
+   * decision made from that record is a decision made about a run that no
+   * longer exists — the socket for it is gone and the durable copy underneath
+   * it is never asked for (FA-07.2, issue #83).
    */
   const openedFinished = useRef<boolean | null>(null);
-  if (openedFinished.current === null && run.data) {
+  if (openedFinished.current === null && !run.isFetching && run.data) {
     openedFinished.current = !isLive(run.data.status);
   }
 
