@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-down dev-logs run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
+.PHONY: help install dev dev-down dev-logs run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
 
 # pnpm is installed via the standalone script — add its bin dir to PATH so make can find it
 PNPM_HOME ?= $(HOME)/.local/share/pnpm
@@ -30,6 +30,7 @@ help:
 	@echo "  test-db               create the test and e2e databases in the running Postgres"
 	@echo "  test-db-prune         drop the per-directory test databases"
 	@echo "  db-check              fail if schema.ts and the migrations disagree"
+	@echo "  db-check-test         test the drift check itself (needs a Postgres it can create a database on)"
 	@echo "  db-generate           generate a Drizzle migration from the schema"
 	@echo "  db-migrate            apply pending migrations (the working path)"
 	@echo "  db-push               push the schema straight to the database — see the note below"
@@ -134,6 +135,16 @@ db-generate:
 # job in CI and the deployment's unit both do.
 db-check:
 	$(PNPM) --filter @scriptoria/db db:check
+
+# The drift check's own regression suite. It builds a throwaway database from
+# the migrations, makes each mutation the check exists to catch — an index that
+# has lost its uniqueness, an index moved to another column, an enum value
+# renamed — and asserts each is reported (#59). It needs a Postgres it can
+# create a database on, which is why CI runs it in the "Schema & migrations"
+# job; it skips itself where there is no DATABASE_URL, so `make test` is
+# unaffected on a machine with no stack up.
+db-check-test:
+	$(PNPM) --filter @scriptoria/db test
 
 db-migrate:
 	$(PNPM) --filter @scriptoria/db db:migrate
