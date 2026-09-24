@@ -140,6 +140,39 @@ async function drive(
     return;
   }
 
+  // FA-08.1 / ADR-003 — #50's other half: a stop that arrives while this worker
+  // is still connecting has nobody to reach. The subscriber is created below,
+  // once there is a PTY to write to, and Redis drops a message published to a
+  // channel with no subscriber — so a `starting` run was racing that window, and
+  // losing the race meant the script ran anyway while the operator, the
+  // interface and the audit trail all said it had been stopped.
+  //
+  // The request is written to the run's row *before* it is published, which is
+  // what makes it readable from here: reading the row closes this side of the
+  // window, and reading it again after subscribing closes the rest, because a
+  // request published before then is already in the row.
+  const stopAsked = await stopRequested(runId);
+  if (stopAsked) {
+    await runRepository.appendEvent(
+      runId,
+      "abort_requested",
+      `${stopAsked} asked to stop before the script started`,
+    );
+    await runRepository.transition(
+      runId,
+      "aborted",
+      { finishedAt: new Date(), failureReason: "aborted_by_user" },
+      ["starting"],
+    );
+    await recordOutcome(run, {
+      status: "aborted",
+      exitCode: null,
+      failureReason: "aborted_by_user",
+      abortStage: null,
+    });
+    return;
+  }
+
   const running = await target.start({
     runId,
     absolutePath: script.script.absolutePath,
@@ -201,6 +234,12 @@ async function drive(
 
   await runRepository.transition(runId, "running", { startedAt: new Date() }, ["starting"]);
   await runRepository.appendEvent(runId, "started", `Started ${script.script.fileName}`);
+
+  // The rest of #50's window: a stop published after the check above and before
+  // this subscriber existed reached nobody, and is in the row by now. The row is
+  // the only place it can still be heard from — and if the subscriber *did* hear
+  // it, `request()` has already been called and this is a no-op.
+  if (await stopRequested(runId)) abort.request();
 
   try {
     const exit = await running.exit;
@@ -370,6 +409,21 @@ async function fail(
       abortStage: null,
     });
   }
+}
+
+/**
+ * Who asked to stop this run, if anyone — read from the run's own row rather
+ * than from the control channel (#50).
+ *
+ * `recordAbortRequest` writes the row *before* the control message is published,
+ * which is what makes it readable here and what makes the two checks in `drive`
+ * complete: a request this worker did not hear is still a request, and it must
+ * not be answered with a script that runs across the estate anyway.
+ */
+async function stopRequested(runId: string): Promise<string | null> {
+  const row = await runRepository.findRunById(runId).catch(() => null);
+  if (!row?.abortRequestedAt) return null;
+  return row.abortRequestedBy ?? "An operator";
 }
 
 /**
