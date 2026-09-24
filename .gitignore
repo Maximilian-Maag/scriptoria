@@ -1,14 +1,24 @@
 # Patterns here are deliberately NOT root-anchored. This is a pnpm workspace, so
 # node_modules, .next and dist exist under apps/* and packages/* as well as at
 # the root — a leading slash would ignore only the root copy and commit the rest.
+#
+# And deliberately without a trailing slash on the two a developer *links*:
+# `node_modules/` matches a directory named node_modules and nothing else, so a
+# worktree that shares the checkout's dependencies with
+#
+#   ln -s ~/scriptoria/node_modules node_modules
+#
+# commits that symlink, and the CI checkout then has a *file* called
+# node_modules — every job dies with `ENOTDIR: not a directory, mkdir
+# …/node_modules` before it runs a single step.
 
 # dependencies
-node_modules/
+node_modules
 .pnp
 .pnp.js
 
 # build output
-.next/
+.next
 out/
 build/
 dist/
