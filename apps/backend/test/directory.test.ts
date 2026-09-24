@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { escapeDnValue, escapeFilterValue } from "../src/lib/auth/directory";
+import { escapeDnValue, escapeFilterValue, expandTemplate } from "../src/lib/auth/directory";
 
 /**
  * The two operations the platform performs against the directory (FA-01.2,
@@ -128,5 +128,55 @@ describe("escapeDnValue (RFC 4514)", () => {
         value,
       );
     }
+  });
+});
+
+/**
+ * The substitution the two escaping functions are applied *through*.
+ *
+ * Escaping is only half of it: the value then goes into a config template, and
+ * `String.replace`'s replacement is not a literal string. `$$`, `$&`, `` $` ``
+ * and `$'` are read as patterns in it — and `$` is not a character either RFC
+ * asks to escape, so it survives the escaping untouched and is interpreted one
+ * step later. `$'` is the one that matters: it means *everything after the
+ * match*, so a username can close its own RDN and open another, having been
+ * escaped correctly.
+ */
+describe("expandTemplate (the substitution the escaping is applied through)", () => {
+  const DN_TEMPLATE = "cn={username},ou=users,dc=scriptoria,dc=test";
+
+  it("inserts a value literally, whatever replacement pattern it contains", () => {
+    for (const value of ["a$&b", "a$'b", "a$`b", "a$$b", "a$1b", "a$<b"]) {
+      expect(expandTemplate(DN_TEMPLATE, "{username}", value), value).toBe(
+        `cn=${value},ou=users,dc=scriptoria,dc=test`,
+      );
+    }
+  });
+
+  it("cannot let a username add a component to the DN it is escaped into", () => {
+    // The injection in full: comma-separated components of its own, after the
+    // escaping has done its job exactly as written.
+    const dn = expandTemplate(
+      DN_TEMPLATE,
+      "{username}",
+      escapeDnValue("admin$',ou=admins,dc=evil"),
+    );
+
+    // Exactly the template's own three separators are still separators.
+    expect(dn.match(/[^\\],/g)).toHaveLength(3);
+    expect(dn.endsWith(",ou=users,dc=scriptoria,dc=test")).toBe(true);
+    expect(dn).not.toContain(",ou=admins");
+  });
+
+  it("cannot let a username end the filter atom it is quoted in", () => {
+    const filter = expandTemplate(
+      "(&(objectClass=group)(member={userDn}))",
+      "{userDn}",
+      escapeFilterValue("cn=a$',ou=users)"),
+    );
+
+    expect(filter.match(/\(/g)).toHaveLength(3);
+    expect(filter.match(/\)/g)).toHaveLength(3);
+    expect(filter.endsWith("))")).toBe(true);
   });
 });

@@ -83,6 +83,21 @@ function clientFor(url: string): Client {
 }
 
 /**
+ * Puts a value into one of the configured templates.
+ *
+ * The value is inserted through a callback, because a *replacement string* is
+ * not literal: `$&`, `` $` ``, `$'` and `$$` are read as patterns there, and a
+ * username may contain any of them. Escaping first does not help — `$` is not a
+ * character either RFC 4514 or RFC 4515 asks to escape — so `.replace(place,
+ * value)` lets `admin$',ou=admins` end its own RDN and open another one, with
+ * the escaping having done its job exactly as written. The callback's return
+ * value is used as-is, patterns and all.
+ */
+export function expandTemplate(template: string, placeholder: string, value: string): string {
+  return template.replace(placeholder, () => value);
+}
+
+/**
  * Binds as the user, then resolves their groups with the service account.
  *
  * Returns `unauthenticated` for bad credentials and `upstream_unavailable` for a
@@ -95,7 +110,11 @@ export async function authenticate(
   password: string,
 ): Promise<Result<DirectoryUser>> {
   const config = loadBackendConfig();
-  const userDn = config.LDAP_USER_DN_TEMPLATE.replace("{username}", escapeDnValue(username));
+  const userDn = expandTemplate(
+    config.LDAP_USER_DN_TEMPLATE,
+    "{username}",
+    escapeDnValue(username),
+  );
 
   const userClient = clientFor(config.LDAP_URL);
   try {
@@ -147,7 +166,7 @@ async function resolveGroups(
   try {
     await client.bind(config.LDAP_BIND_DN, config.LDAP_BIND_PASSWORD);
 
-    const filter = config.LDAP_GROUP_FILTER.replace("{userDn}", escapeFilterValue(userDn));
+    const filter = expandTemplate(config.LDAP_GROUP_FILTER, "{userDn}", escapeFilterValue(userDn));
     const { searchEntries } = await client.search(config.LDAP_GROUP_SEARCH_BASE, {
       filter,
       scope: "sub",
