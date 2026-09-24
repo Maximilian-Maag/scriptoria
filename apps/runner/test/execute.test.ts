@@ -29,6 +29,12 @@ interface RedisState {
   commands: unknown[][];
   /** Connections the runner opened, so a test can deliver a message on one. */
   subscribers: EventEmitter[];
+  /**
+   * Held to keep the publisher mid-append, which is the window between the
+   * script's exit and the run being wound up — the window a late stop arrives
+   * in, when it arrives at all.
+   */
+  xaddHold: { promise: Promise<void>; release: () => void } | null;
 }
 
 const REDIS = "__testRedis";
@@ -44,8 +50,10 @@ vi.mock("ioredis", async () => {
     }
 
     async xadd(...args: unknown[]): Promise<string> {
-      state().commands.push(["xadd", ...args]);
-      return `${Date.now()}-${state().commands.length}`;
+      const current = state();
+      current.commands.push(["xadd", ...args]);
+      if (current.xaddHold) await current.xaddHold.promise;
+      return `${Date.now()}-${current.commands.length}`;
     }
 
     async expire(...args: unknown[]): Promise<number> {
@@ -273,6 +281,7 @@ function fresh(): ScriptState {
   (globalThis as Record<string, unknown>)[REDIS] = {
     commands: [],
     subscribers: [],
+    xaddHold: null,
   } satisfies RedisState;
 
   const db = (globalThis as Record<string, unknown>)[DB] as DbState;
@@ -306,6 +315,43 @@ function fresh(): ScriptState {
   const script: ScriptState = { signals: [], dataListener: null, resolveExit, exit, listCalls: 0 };
   (globalThis as Record<string, unknown>)[TARGET] = script;
   return script;
+}
+
+/**
+ * Holds the stream's next append, so a test can act inside the window between
+ * the script's exit and the run being wound up — the window a late stop arrives
+ * in, when it arrives at all. Returns the release.
+ */
+function holdStream(): () => void {
+  let release: () => void = () => {};
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  state().xaddHold = { promise, release };
+
+  return () => {
+    state().xaddHold = null;
+    release();
+  };
+}
+
+/** Delivers a control message the way Redis would, to whoever is subscribed. */
+function deliverControl(runId: string, payload: unknown): void {
+  const channel = Buffer.from(`scriptoria:run:${runId}:control`);
+  const message = Buffer.from(JSON.stringify(payload));
+  let delivered = 0;
+
+  for (const connection of state().subscribers) {
+    for (const listener of connection.listeners("messageBuffer")) {
+      (listener as (...args: unknown[]) => void)(channel, message);
+      delivered += 1;
+    }
+  }
+
+  // A message published while nobody is subscribed is dropped by Redis, which
+  // is what a run that has not opened its PTY yet looks like from here. A test
+  // must fail loudly rather than pass because it shouted into an empty room.
+  if (delivered === 0) throw new Error("no control subscriber was listening");
 }
 
 describe("executeRun", () => {
@@ -393,5 +439,63 @@ describe("executeRun", () => {
     db().transitionThrows = true;
 
     await expect(executeRun(RUN_ID, WORKER)).resolves.toBeUndefined();
+  });
+
+  /**
+   * The defect this test exists for. The stop arrives while the run is being
+   * wound up, after the script has exited 0 on its own. The escalation used to
+   * take the message at face value, signal a process group whose process was
+   * already gone, and let the final status be decided by a flag — so a run that
+   * succeeded was recorded `aborted` / `aborted_by_user` at stage `sigint`, and
+   * dropped out of FA-10.2's *last successful*.
+   */
+  it("does not turn a run that finished by itself into an aborted one", async () => {
+    const script = fresh();
+    const releaseStream = holdStream();
+
+    const done = executeRun(RUN_ID, WORKER);
+    await running();
+
+    script.dataListener?.(Buffer.from("done\n"));
+    await tick();
+    script.resolveExit({ code: 0, signal: null });
+    await tick();
+    await tick();
+
+    deliverControl(RUN_ID, { type: "abort", requestedBy: "admin", at: new Date().toISOString() });
+    await tick();
+
+    releaseStream();
+    await done;
+
+    expect(db().status).toBe("succeeded");
+    expect(script.signals).toEqual([]);
+    expect(db().transitions.at(-1)?.patch.abortStage).toBeNull();
+    expect(db().events.map((e) => `${e.kind}: ${e.message}`)).toContain(
+      "abort_requested: admin asked after the script had already exited",
+    );
+  });
+
+  /**
+   * The other half of the same rule, and the reason the fix cannot simply
+   * ignore stop requests: a stop that arrives while the script really is running
+   * still escalates through ADR-003's stages and is recorded as the abort it
+   * was. Without this the fix would "pass" by never aborting anything.
+   */
+  it("still stops a run that is running, and records it as aborted", async () => {
+    const script = fresh();
+
+    const done = executeRun(RUN_ID, WORKER);
+    await running();
+
+    deliverControl(RUN_ID, { type: "abort", requestedBy: "admin", at: new Date().toISOString() });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    script.resolveExit({ code: null, signal: "SIGKILL" });
+    await done;
+
+    expect(script.signals).toEqual(["sigint", "sigterm", "sigkill"]);
+    expect(db().status).toBe("aborted");
+    expect(db().transitions.at(-1)?.patch.failureReason).toBe("aborted_by_user");
   });
 });

@@ -157,10 +157,23 @@ async function drive(
         running.resize(message.cols, message.rows);
         return;
       }
+
+      const outcome = abort.request();
+      if (outcome === "already_requested") return;
+
+      // A stop that arrived too late is recorded as what it was. An operator who
+      // pressed the button is owed the difference between "stopped" and "was
+      // already over", and the run they pressed it on is not going to change
+      // state to say so (FA-08.1).
       void runRepository
-        .appendEvent(runId, "abort_requested", `Requested by ${message.requestedBy}`)
+        .appendEvent(
+          runId,
+          "abort_requested",
+          outcome === "too_late"
+            ? `${message.requestedBy} asked after the script had already exited`
+            : `Requested by ${message.requestedBy}`,
+        )
         .catch(() => {});
-      abort.request();
     },
   });
 
@@ -177,8 +190,14 @@ async function drive(
     const exit = await running.exit;
     await publisher.flush();
 
-    const status = abort.wasRequested ? "aborted" : exit.code === 0 ? "succeeded" : "failed";
-    const failureReason: RunFailureReason | null = abort.wasRequested
+    // Decided by what happened, not by what was asked for. An abort that arrived
+    // after the script had already exited is not an abort: the run did what it
+    // did, and recording it as stopped would both lie about the script and take
+    // the run out of FA-10.2's *last successful* on the strength of a late click
+    // (ADR-003 keeps `aborted` for a run a human really stopped).
+    const stopped = abort.wasSignalled;
+    const status = stopped ? "aborted" : exit.code === 0 ? "succeeded" : "failed";
+    const failureReason: RunFailureReason | null = stopped
       ? "aborted_by_user"
       : exit.code === 0
         ? null
