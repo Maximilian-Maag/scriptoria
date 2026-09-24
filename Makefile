@@ -27,6 +27,7 @@ help:
 	@echo "  type-check            TypeScript type-check everything"
 	@echo "  test                  run unit and integration tests"
 	@echo "  test-e2e              run the Playwright end-to-end suite (needs a live stack: make dev)"
+	@echo "                        E2E_SPECS=tests/05-stop.spec.ts runs one requirement's specs"
 	@echo "  test-db               create the test and e2e databases in the running Postgres"
 	@echo "  test-db-prune         drop the per-directory test databases"
 	@echo "  db-check              fail if schema.ts and the migrations disagree"
@@ -97,11 +98,21 @@ test:
 # it asserts on is the state its own migrate-and-seed put there.
 E2E_DATABASE_URL ?= postgres://postgres:postgres@localhost:5433/scriptoria_e2e
 
+# One requirement can be run on its own, by naming any Playwright filter:
+#
+#   make test-e2e E2E_SPECS=tests/05-stop.spec.ts
+#
+# CI gives each requirement its own check with this, so a red end-to-end run
+# names the requirement it broke instead of "the suite is broken" — and so the
+# failure lands next to the requirement's own specs rather than in a five-minute
+# log. Empty means the whole suite, which is what a developer wants.
+E2E_SPECS ?=
+
 test-e2e: test-db
 	@echo "  e2e database: $(E2E_DATABASE_URL)"
 	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) --filter @scriptoria/db db:migrate
 	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) --filter @scriptoria/db db:seed
-	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) test:e2e
+	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) test:e2e $(if $(E2E_SPECS),-- $(E2E_SPECS),)
 
 # The backend suite creates its own database on first run — one per working
 # directory, so two runs cannot truncate each other's tables. This target only
