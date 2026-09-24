@@ -111,6 +111,11 @@ interface DbState {
   transitionThrows: boolean;
   /** Set to make the script the run names no longer be in the catalog. */
   scriptMissing: boolean;
+  /**
+   * Set to have the stop land while the PTY is being opened — #50's window,
+   * after the check that runs before `start` and before the subscriber exists.
+   */
+  abortDuringStart: boolean;
   /** FA-12 audit entries the runner wrote, in order. */
   audit: Record<string, unknown>[];
 }
@@ -131,6 +136,7 @@ vi.mock("@scriptoria/db", async () => {
     findRunThrows: false,
     transitionThrows: false,
     scriptMissing: false,
+    abortDuringStart: false,
     audit: [],
   };
   (globalThis as Record<string, unknown>)[DB] = db;
@@ -222,6 +228,13 @@ vi.mock("../src/driver/sshTarget", async () => ({
     stat: async () => ({ sizeBytes: 10, modifiedAt: new Date(), executable: true }),
     start: async (spec: { runId: string }) => {
       started.push(spec.runId);
+      // #50's window, from the losing side: the stop is recorded in the run's row
+      // while the PTY is being opened — after the check that runs before `start`
+      // and before the subscriber exists, so nothing can deliver it as a message.
+      if (db().abortDuringStart) {
+        db().run.abortRequestedAt = new Date("2026-09-24T12:00:00.000Z");
+        db().run.abortRequestedBy = "admin";
+      }
       const script = (globalThis as Record<string, unknown>)[TARGET] as ScriptState;
       return {
         onData: (listener: (chunk: Buffer) => void) => {
@@ -302,6 +315,7 @@ function fresh(): ScriptState {
   db.findRunThrows = false;
   db.transitionThrows = false;
   db.scriptMissing = false;
+  db.abortDuringStart = false;
   db.audit = [];
   db.run = {
     id: RUN_ID,
@@ -313,6 +327,9 @@ function fresh(): ScriptState {
     outputPath: "/opt/scriptoria/export",
     scriptFileName: "nightly.sh",
     startedBy: "admin",
+    /** Nobody has asked to stop it, which is the ordinary case. */
+    abortRequestedAt: null,
+    abortRequestedBy: null,
     host: "vm1.example.test",
   };
   started.length = 0;
@@ -434,6 +451,58 @@ describe("executeRun", () => {
     expect(db().events.map((e) => `${e.kind}: ${e.message}`)).toEqual([
       "error: Error: the database is not answering",
     ]);
+  });
+
+  /**
+   * FA-08.1 / ADR-003 — #50. A stop asked for while the worker was connecting
+   * reached nobody: the control subscriber is created once there is a PTY to
+   * write to, and Redis drops a message published to a channel with no
+   * subscriber. The request is written to the run's row before it is published,
+   * so the row is where this worker can still hear it — and the run it was asked
+   * about must not start at all.
+   */
+  it("does not start a script whose stop was asked for before the worker got there", async () => {
+    fresh();
+    db().run.abortRequestedAt = new Date("2026-09-24T12:00:00.000Z");
+    db().run.abortRequestedBy = "admin";
+
+    await executeRun(RUN_ID, WORKER);
+
+    expect(started, "a script nobody wants running must not be started").toEqual([]);
+    expect(db().status).toBe("aborted");
+    expect(db().transitions.at(-1)?.patch.failureReason).toBe("aborted_by_user");
+    expect(db().events.map((e) => `${e.kind}: ${e.message}`)).toContain(
+      "abort_requested: admin asked to stop before the script started",
+    );
+    // FA-12.1's outcome, and the one an operator will look for afterwards.
+    expect(db().audit.at(-1)).toMatchObject({
+      action: "run_finished",
+      outcome: "success",
+      detail: { status: "aborted", failureReason: "aborted_by_user", abortStage: null },
+    });
+  });
+
+  /**
+   * The same window from the other side: the stop lands *after* the check above
+   * and *before* the subscriber exists, so it arrives as neither a message nor a
+   * row the worker has read yet. The second check — the row, read again once the
+   * subscriber is up — is what catches it, and the script that did start is then
+   * stopped through the ordinary stages.
+   */
+  it("stops a run whose stop landed while the PTY was being opened", async () => {
+    const script = fresh();
+    db().abortDuringStart = true;
+
+    const done = executeRun(RUN_ID, WORKER);
+    await running();
+
+    expect(script.signals, "the stop must be applied to the running script").toEqual(["sigint"]);
+
+    script.resolveExit({ code: null, signal: "SIGINT" });
+    await done;
+
+    expect(db().status).toBe("aborted");
+    expect(db().transitions.at(-1)?.patch.failureReason).toBe("aborted_by_user");
   });
 
   /**
