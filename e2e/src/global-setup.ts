@@ -11,7 +11,8 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { connect } from "node:net";
-import { REQUIRED_SERVICES } from "./env";
+import { request } from "@playwright/test";
+import { ACCOUNTS, BASE_URL, REFERENCE_AREA, REQUIRED_SERVICES } from "./env";
 
 /** `e2e/src/` → the repository root, which is where `.env` and `infra/` live. */
 export const REPOSITORY_ROOT = resolve(import.meta.dirname, "..", "..");
@@ -29,6 +30,85 @@ function reachable(host: string, port: number, timeoutMs = 3_000): Promise<boole
     socket.once("timeout", () => done(false));
     socket.once("error", () => done(false));
   });
+}
+
+/**
+ * Waits for the *applications*, not just for the containers.
+ *
+ * `reachable` above only proves the four containers are listening. The three
+ * application processes are started by the suite's own `webServer`, and its
+ * readiness signal is the frontend's `/login` — so the specs can begin while the
+ * control plane is still compiling and while the runner is still starting. The
+ * first request that needs the runner then waits out the control plane's
+ * 30-second RPC timeout, races the frontend's identical proxy timeout, and
+ * surfaces as `502 upstream_unavailable` in whichever spec happened to need the
+ * catalog first. Every other spec in that job fails the same way for the same
+ * reason, which reads as "the whole suite is broken" rather than "one process
+ * never started". That is the failure this file exists to prevent, and the one
+ * it did not yet cover.
+ *
+ * The catalog is the readiness signal because it is the only request that proves
+ * the whole chain at once: frontend → control plane → runner → SSH → the
+ * fixture's directory. Everything a spec does after that is a feature rather
+ * than a prerequisite.
+ */
+async function waitForTheApplications(timeoutMs = 120_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  const api = await request.newContext({ baseURL: BASE_URL });
+  let last = "nothing has answered yet";
+
+  try {
+    while (Date.now() < deadline) {
+      try {
+        const signIn = await api.post("/api/proxy/auth/login", { data: ACCOUNTS.branch });
+
+        if (signIn.ok()) {
+          const areas = await api.get("/api/proxy/areas");
+
+          if (areas.ok()) {
+            const list = (await areas.json()) as Array<{ id: string; name: string }>;
+            const area = list.find((candidate) => candidate.name === REFERENCE_AREA.name);
+
+            if (!area) {
+              last = `the areas list does not contain ${REFERENCE_AREA.name}`;
+            } else {
+              const catalog = await api.get(`/api/proxy/areas/${area.id}/scripts`);
+              if (catalog.ok()) return;
+              last = `the catalog answered ${catalog.status()}: ${(await catalog.text()).slice(0, 200)}`;
+            }
+          } else {
+            last = `the areas list answered ${areas.status()}`;
+          }
+        } else {
+          last = `signing in answered ${signIn.status()}: ${(await signIn.text()).slice(0, 200)}`;
+        }
+      } catch (cause) {
+        // Not listening yet is an ordinary outcome while the three processes
+        // come up, and it is not a failure of the run.
+        last = cause instanceof Error ? cause.message : String(cause);
+      }
+
+      await new Promise((resume) => setTimeout(resume, 2_000));
+    }
+
+    throw new Error(
+      [
+        `The applications did not answer the catalog within ${Math.round(timeoutMs / 1_000)} seconds.`,
+        `  · last answer: ${last}`,
+        "",
+        "The runner is the usual reason, and it is the one process with no port to poll: the",
+        "suite waits only for the frontend, so a runner that never registered leaves every",
+        "request that needs the catalog waiting out the control plane's 30-second RPC timeout.",
+        "Its own log lines are printed above this message by the web server.",
+        "",
+        "Check that the fixture key exists (`make fixtures-key`), that the script-VM fixture is",
+        "reachable on its SSH port, and that the runner started at all.",
+        "",
+      ].join("\n"),
+    );
+  } finally {
+    await api.dispose();
+  }
 }
 
 export default async function globalSetup(): Promise<void> {
@@ -77,7 +157,8 @@ export default async function globalSetup(): Promise<void> {
   // and `Secure` session cookies (the browser drops the cookie over plain
   // http, so signing in appears to do nothing at all).
   const hasEnvFile = existsSync(resolve(REPOSITORY_ROOT, ".env"));
-  const skipsHostKey = (process.env["SSH_SKIP_HOST_KEY_VERIFICATION"] ?? "").toLowerCase() === "true";
+  const skipsHostKey =
+    (process.env["SSH_SKIP_HOST_KEY_VERIFICATION"] ?? "").toLowerCase() === "true";
   const hasKnownHosts = Boolean(process.env["SSH_KNOWN_HOSTS_PATH"]);
 
   if (!hasEnvFile && !skipsHostKey && !hasKnownHosts) {
@@ -94,4 +175,6 @@ export default async function globalSetup(): Promise<void> {
       ].join("\n"),
     );
   }
+
+  await waitForTheApplications();
 }
