@@ -182,12 +182,30 @@ async function drive(
 
     // FA-07.2: the durable copy of the scrollback, so the capped stream may
     // expire without taking the history with it.
-    await runRepository.saveTranscript(
-      runId,
-      transcript.toBase64(),
-      transcript.sizeBytes,
-      transcript.truncated,
-    );
+    //
+    // Kept out of the collection's `try` below, because they are two promises
+    // and neither may take the other down with it. Sharing one made the
+    // transcript the collection's failure: a database blip on the way in meant a
+    // run that wrote files showed none of them, permanently and with no error a
+    // person would trust — the failure was reported against a run already
+    // written `succeeded`, so the record meant to say so was itself rejected.
+    // The scrollback is recoverable from nothing, so losing it is worth a run
+    // event; losing the results is what FA-09.5 exists to forbid.
+    try {
+      await runRepository.saveTranscript(
+        runId,
+        transcript.toBase64(),
+        transcript.sizeBytes,
+        transcript.truncated,
+      );
+    } catch (cause) {
+      log.error("could not persist the transcript", { runId, error: describeError(cause) });
+      await runRepository.appendEvent(
+        runId,
+        "error",
+        `Transcript not persisted: ${describeError(cause)}`,
+      );
+    }
 
     await collect(target, runId, run.outputPath, before);
   } finally {
