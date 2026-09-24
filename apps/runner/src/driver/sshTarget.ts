@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { Client, utils, type ClientChannel, type FileEntryWithStats, type SFTPWrapper } from "ssh2";
+import ssh2, { Client, type ClientChannel, type FileEntryWithStats, type SFTPWrapper } from "ssh2";
 import { loadRunnerConfig } from "@scriptoria/config";
 import type { AbortStage } from "@scriptoria/contracts";
 import {
@@ -23,6 +23,23 @@ import type {
   StartSpec,
   TargetAddress,
 } from "./executionTarget";
+
+/**
+ * `ssh2` is CommonJS, and Node's ESM loader publishes only the exports its
+ * lexer can see: `Client` is one of them, `utils` is not.
+ *
+ * On Node 22 — the version CI pins — the named import therefore kills the runner
+ * at import time, before it registers with anything:
+ *
+ *   SyntaxError: The requested module 'ssh2' does not provide an export named 'utils'
+ *
+ * and the runner then looks like a worker that never started, which every
+ * request that needs the catalog reports as a 30-second timeout. A developer's
+ * newer Node resolves the named import and hides this completely, and so does
+ * the test suite, where vitest's own CommonJS interop stands in for the loader.
+ * Reading it off the module object is the form that works everywhere.
+ */
+const { utils } = ssh2;
 
 /**
  * ADR-001's implementation: outbound SSH, a PTY for the run, SFTP for the
