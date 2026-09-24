@@ -58,3 +58,26 @@ export const updateScheduleRequestSchema = z.object({
   enabled: z.boolean().optional(),
 });
 export type UpdateScheduleRequest = z.infer<typeof updateScheduleRequestSchema>;
+
+/**
+ * FA-10.1 — a schedule's id, which is *derived* rather than stored.
+ *
+ * ADR-005 makes the crontab on the script VM the truth, so a scheduled line has
+ * no row to hang an id on. `scheduleId()` in `@scriptoria/core` hashes the
+ * source, the command and the line's occurrence into **eight hex characters**,
+ * so that a line's identity survives being read out of the file and written
+ * back into it — and survives an edit to its expression, which is the whole
+ * point of keying on the command.
+ *
+ * It is therefore not a UUID and never was. A route that validates it as one
+ * refuses every request it exists to serve (#73): saving a schedule answered
+ * `validation_failed` / "The request body is not valid" and named the wrong
+ * input, because the body was the one thing that was right.
+ *
+ * The declared shape is asserted against the generator in
+ * `apps/backend/test/http.test.ts`, so the two cannot drift apart again.
+ */
+export const scheduleIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{8}$/, "Must be an eight-character schedule id, like 8069ac6e");
+export type ScheduleId = z.infer<typeof scheduleIdSchema>;

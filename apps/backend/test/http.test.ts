@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { scheduleId } from "@scriptoria/core";
+import { scheduleIdSchema, uuidSchema } from "@scriptoria/contracts";
 import { parseOptionalBody, parsePath } from "../src/lib/http";
 
 /**
@@ -154,12 +156,14 @@ describe("parsePath", () => {
  * And the same thing through the route handler: a malformed id is the caller's
  * mistake, answered in the envelope, and never reaches a service.
  */
-const { abortRun, readSession } = vi.hoisted(() => ({
+const { abortRun, updateSchedule, readSession } = vi.hoisted(() => ({
   abortRun: vi.fn(),
+  updateSchedule: vi.fn(),
   readSession: vi.fn(),
 }));
 
 vi.mock("@/lib/services/runService", () => ({ abortRun, getRun: vi.fn() }));
+vi.mock("@/lib/services/scheduleService", () => ({ updateSchedule }));
 vi.mock("@/lib/auth/session", () => ({ readSession }));
 
 describe("DELETE /api/runs/{runId}", () => {
@@ -228,5 +232,112 @@ describe("DELETE /api/runs/{runId}", () => {
 
     expect(response.status).toBe(422);
     expect(abortRun).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * FA-10.1 / FA-10.4 — the path segment that is not a UUID.
+ *
+ * A schedule's id is *derived* from the crontab line it names (ADR-005) and is
+ * eight hex characters. #64's guard stated "every id in this API is a UUID" and
+ * refused every save with `validation_failed` / "The request body is not valid",
+ * pointing at the body — the one input that was correct (#73). The generator is
+ * in `@scriptoria/core`, the shape is declared in `@scriptoria/contracts`, and
+ * nothing asserted that the two agree; that assertion is the first test below,
+ * and it is what would have caught this.
+ */
+const SCHEDULE_COMMAND =
+  "/opt/scriptoria/scripts/inventory-report.sh >> /opt/scriptoria/export/cron-inventory.log 2>&1";
+const SOURCE_ID = "00000000-0000-4000-8000-000000000001";
+const SCHEDULE_ID = scheduleId(SOURCE_ID, SCHEDULE_COMMAND, 1);
+
+describe("parsePath with a schedule id", () => {
+  it("accepts the id the crontab reader hands the interface", () => {
+    // The premise of the defect, stated rather than assumed: it is not a UUID.
+    expect(uuidSchema.safeParse(SCHEDULE_ID).success).toBe(false);
+
+    const path = parsePath({ scheduleId: SCHEDULE_ID }, { scheduleId: scheduleIdSchema });
+
+    expect(path.ok).toBe(true);
+    expect(path.ok && path.value).toEqual({ scheduleId: SCHEDULE_ID });
+  });
+
+  it("names the shape it wanted when the segment is not one", () => {
+    const path = parsePath({ scheduleId: "not-a-schedule" }, { scheduleId: scheduleIdSchema });
+
+    expect(path.ok).toBe(false);
+    expect(!path.ok && path.code).toBe("validation_failed");
+    expect(!path.ok && path.details?.[0]?.path).toBe("scheduleId");
+    expect(!path.ok && path.details?.[0]?.message).toMatch(/eight-character schedule id/);
+  });
+
+  it("keeps the UUID guard for the ids that do name a row", () => {
+    const path = parsePath({ areaId: SCHEDULE_ID });
+
+    expect(path.ok).toBe(false);
+    expect(!path.ok && path.details?.[0]?.path).toBe("areaId");
+    expect(!path.ok && path.details?.[0]?.message).toBe("Must be a UUID");
+  });
+});
+
+/**
+ * And through the route the operator actually uses. A schedule save that never
+ * reaches the service is the defect; the service is mocked because what is under
+ * test is whether the request gets there at all.
+ */
+describe("PATCH /api/schedules/{scheduleId}", () => {
+  /** Root, because platform administration is root's job (FA-11, requirements §1). */
+  const ROOT_SESSION = {
+    id: "session-1",
+    username: "platform.root",
+    displayName: "Platform Root",
+    role: "root" as const,
+    groups: [],
+    areaIds: [],
+    createdAt: Date.now(),
+  };
+
+  const patch = (scheduleIdParam: string, body: unknown = { expression: "15 2 * * *" }) =>
+    new Request(`http://backend.test/api/schedules/${scheduleIdParam}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+    });
+
+  it("saves the expression for the line the id names", async () => {
+    readSession.mockResolvedValue(ROOT_SESSION);
+    updateSchedule.mockReset();
+    updateSchedule.mockResolvedValue({
+      ok: true,
+      value: { id: SCHEDULE_ID, expression: "15 2 * * *" },
+    });
+
+    const { PATCH } = await import("../src/app/api/schedules/[scheduleId]/route");
+    const response = await PATCH(patch(SCHEDULE_ID), {
+      params: Promise.resolve({ scheduleId: SCHEDULE_ID }),
+    });
+
+    expect(updateSchedule).toHaveBeenCalledTimes(1);
+    expect(updateSchedule.mock.calls[0]?.[1]).toBe(SCHEDULE_ID);
+    expect(updateSchedule.mock.calls[0]?.[2]).toEqual({ expression: "15 2 * * *" });
+    expect(response.status).toBe(200);
+  });
+
+  it("still refuses a segment that cannot be a schedule id, and names it", async () => {
+    readSession.mockResolvedValue(ROOT_SESSION);
+    updateSchedule.mockReset();
+
+    const { PATCH } = await import("../src/app/api/schedules/[scheduleId]/route");
+    const response = await PATCH(patch("nope"), {
+      params: Promise.resolve({ scheduleId: "nope" }),
+    });
+    const body = (await response.json()) as {
+      error?: { code?: string; details?: { path: string }[] };
+    };
+
+    expect(response.status).toBe(422);
+    expect(body.error?.code).toBe("validation_failed");
+    expect(body.error?.details?.[0]?.path).toBe("scheduleId");
+    expect(updateSchedule).not.toHaveBeenCalled();
   });
 });
