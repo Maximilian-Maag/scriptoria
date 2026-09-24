@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { SessionUser } from "@scriptoria/contracts";
 import { AppShell } from "../src/components/AppShell";
@@ -60,7 +60,7 @@ function answering(routes: Record<string, Answer>): void {
   );
 }
 
-function renderShell(): void {
+function renderShell(): QueryClient {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
@@ -69,6 +69,7 @@ function renderShell(): void {
       </AppShell>
     </QueryClientProvider>,
   );
+  return client;
 }
 
 afterEach(() => {
@@ -130,6 +131,43 @@ describe("the left navigation when the areas call fails", () => {
 
     expect(await screen.findByRole("link", { name: "Core network" })).toBeTruthy();
     expect(screen.queryByText(/Could not load the areas/)).toBeNull();
+  });
+
+  it("keeps the areas on screen when a refetch fails, with the failure said above them", async () => {
+    const routes: Record<string, Answer> = {
+      "/auth/session": { status: 200, body: { user: USER } },
+      "/areas": {
+        status: 200,
+        body: [
+          {
+            id: "b1e1f3a7-7a2d-4b74-8b6d-3b3e8b8f5f3f",
+            name: "Core network",
+            description: "",
+            category: "recurring",
+          },
+        ],
+      },
+    };
+    answering(routes);
+
+    const client = renderShell();
+    expect(await screen.findByRole("link", { name: "Core network" })).toBeTruthy();
+
+    // The read that failed is the *second* one. react-query keeps the last
+    // successful response, so those links are still the operator's — and the
+    // failure is still a failure, which is the half #57 is about.
+    routes["/areas"] = {
+      status: 500,
+      body: { error: { code: "internal", message: "The areas could not be read" } },
+    };
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["areas"] });
+    });
+
+    expect(await screen.findByText("Could not load the areas")).toBeTruthy();
+    expect(screen.getByText("The areas could not be read")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Core network" })).toBeTruthy();
+    expect(screen.queryByText("No areas yet")).toBeNull();
   });
 
   it("keeps the shell hidden and redirects when the session is gone", async () => {

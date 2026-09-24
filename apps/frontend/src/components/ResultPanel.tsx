@@ -90,6 +90,12 @@ export function ResultPanel({ run }: { run: Run }) {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* A read that failed is said as a failure (#57), and what is already on
+            screen stays on screen: a *refetch* that fails leaves the last
+            successful response in `results.data`, so these files can be real
+            while the read that just failed is real too. Taking them away would
+            hide output FA-09.5 keeps visible; the empty state is a claim about
+            the run and stays for a read that succeeded and came back empty. */}
         {results.isError ? (
           <ErrorState
             detail={
@@ -98,7 +104,8 @@ export function ResultPanel({ run }: { run: Run }) {
                 : "The control plane did not answer."
             }
           />
-        ) : files.length > 0 ? (
+        ) : null}
+        {files.length > 0 ? (
           <ul className="divide-y divide-line">
             {files.map((file) => (
               <li key={file.path} className="px-5 py-2.5">
@@ -145,7 +152,7 @@ export function ResultPanel({ run }: { run: Run }) {
               </li>
             ))}
           </ul>
-        ) : (
+        ) : results.isError ? null : (
           <EmptyState finished={run.finishedAt !== null} />
         )}
       </div>

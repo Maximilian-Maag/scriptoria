@@ -125,31 +125,38 @@ function AreaList({
   if (loading) return <p className="px-2 text-xs text-ink-faint">Loading areas…</p>;
 
   /**
-   * A read that failed, said as a failure (issue #57).
+   * A read that failed, said as a failure (issue #57) — and what to do with
+   * whatever is still on screen.
+   *
+   * `isError` and "there is nothing to show" are two different statements, and a
+   * *refetch* is where they come apart: react-query keeps the last successful
+   * response when a refetch fails, so the links below can still be real while
+   * the read that just failed is real too. Replacing them with the panel takes
+   * away navigation the operator had a second ago; hiding the panel because
+   * links exist would put an outage back to looking like an ordinary page, which
+   * is the whole of #57. So the panel goes above what survived.
    *
    * The empty state below is a statement about the account's directory groups,
    * and FA-01.4 is the requirement that says so. A failed areas call is not
    * evidence for it: the entitlement may be perfectly correct and the control
-   * plane simply not answering. Rendering the empty state here turns an outage
-   * into "none of your groups is entitled to an area yet, ask whoever
-   * maintains the group mapping" — advice to go and repair something that is
-   * not broken, on the strength of an answer that never arrived.
-   *
-   * The area page and the run history already keep these two apart; this is
-   * the same split with the same shape of message.
+   * plane simply not answering. Rendering it turns an outage into "none of your
+   * groups is entitled to an area yet, ask whoever maintains the group mapping"
+   * — advice to go and repair something that is not broken, on the strength of
+   * an answer that never arrived. It is kept for a read that succeeded and came
+   * back empty.
    */
-  if (error) {
-    return (
-      <div className="rounded-[var(--radius-panel)] border border-line bg-surface px-3 py-3">
-        <p className="text-xs font-medium text-ink">Could not load the areas</p>
-        <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
-          {error instanceof ApiFailure ? error.message : "The control plane did not answer."}
-        </p>
-      </div>
-    );
-  }
+  const failure = error ? (
+    <div className="rounded-[var(--radius-panel)] border border-line bg-surface px-3 py-3">
+      <p className="text-xs font-medium text-ink">Could not load the areas</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
+        {error instanceof ApiFailure ? error.message : "The control plane did not answer."}
+      </p>
+    </div>
+  ) : null;
 
   if (areas.length === 0) {
+    if (failure) return failure;
+
     /**
      * FA-01.4, and the one empty state in this product that must not look like
      * a failure: an account in no entitled group authenticates perfectly well
@@ -171,6 +178,7 @@ function AreaList({
 
   return (
     <div className="space-y-5">
+      {failure}
       {categories.map((category) => (
         <section key={category}>
           <h2 className="px-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">

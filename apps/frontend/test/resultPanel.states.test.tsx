@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ResultList, Run } from "@scriptoria/contracts";
 import { ResultPanel } from "../src/components/ResultPanel";
@@ -69,13 +69,42 @@ function answeringResults(status: number, body: unknown): void {
   );
 }
 
-function renderPanel(run: Run): void {
+/**
+ * A control plane that answers one way and then another — the *refetch* case,
+ * where the first read succeeded and the one after it did not.
+ */
+function answeringResultsThen(
+  first: { status: number; body: unknown },
+  then: { status: number; body: unknown },
+): void {
+  let calls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      const answer = calls++ === 0 ? first : then;
+      return new Response(JSON.stringify(answer.body), {
+        status: answer.status,
+        headers: { "content-type": "application/json" },
+      });
+    }),
+  );
+}
+
+function renderPanel(run: Run): QueryClient {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <ResultPanel run={run} />
     </QueryClientProvider>,
   );
+  return client;
+}
+
+/** Forces the read the panel would make on its own, and waits for it. */
+async function refetch(client: QueryClient): Promise<void> {
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ["results", RUN_ID] });
+  });
 }
 
 afterEach(() => {
@@ -129,5 +158,72 @@ describe("the results panel when the list cannot be read", () => {
     expect(await screen.findByText("rules.csv")).toBeTruthy();
     expect(screen.queryByText("No result files")).toBeNull();
     expect(screen.queryByText(/Could not read the results/)).toBeNull();
+  });
+
+  it("keeps the files of an earlier read on screen when a refetch fails", async () => {
+    answeringResultsThen(
+      {
+        status: 200,
+        body: listing([
+          {
+            path: "rules.csv",
+            name: "rules.csv",
+            sizeBytes: 2048,
+            modifiedAt: "2026-09-23T04:06:00.000Z",
+            contentType: "text/csv",
+            previewable: true,
+          },
+        ]),
+      },
+      {
+        status: 500,
+        body: {
+          error: {
+            code: "internal",
+            message: "The control plane could not list the output directory",
+          },
+        },
+      },
+    );
+
+    const client = renderPanel(finishedRun());
+    expect(await screen.findByText("rules.csv")).toBeTruthy();
+
+    await refetch(client);
+
+    // The failure is said, and the output the last good read gave us stays:
+    // FA-09.5 keeps what a run produced visible, and a refetch that failed is
+    // not a reason to take it away.
+    expect(await screen.findByText("Could not read the results")).toBeTruthy();
+    expect(screen.getByText("rules.csv")).toBeTruthy();
+    expect(screen.queryByText("No result files")).toBeNull();
+  });
+
+  it("does not claim the run wrote nothing when a refetch of an empty list fails", async () => {
+    answeringResultsThen(
+      { status: 200, body: listing([]) },
+      {
+        status: 500,
+        body: {
+          error: {
+            code: "internal",
+            message: "The control plane could not list the output directory",
+          },
+        },
+      },
+    );
+
+    const client = renderPanel(finishedRun());
+    // The first read succeeded and was empty, so the empty state was true then.
+    expect(await screen.findByText("No result files")).toBeTruthy();
+
+    await refetch(client);
+
+    // Now it is not: there is nothing cached to keep, and the claim about the
+    // run is not available from a read that failed. The panel says only the
+    // failure, rather than the failure beside a statement it can no longer make.
+    expect(await screen.findByText("Could not read the results")).toBeTruthy();
+    expect(screen.queryByText("No result files")).toBeNull();
+    expect(screen.queryByText(/wrote nothing into its output directory/)).toBeNull();
   });
 });
