@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
 import type { AreaCategory, AreaSummary } from "@scriptoria/contracts";
-import { api } from "@/lib/api";
+import { ApiFailure, api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 
 /**
@@ -59,7 +59,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         </Link>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
-          <AreaList areas={areas.data ?? []} loading={areas.isLoading} />
+          <AreaList
+            areas={areas.data ?? []}
+            loading={areas.isLoading}
+            error={areas.isError ? areas.error : null}
+          />
         </div>
 
         {/* FA-11. Shown only to the root account, because it is the only
@@ -107,10 +111,43 @@ function AdminLink() {
   );
 }
 
-function AreaList({ areas, loading }: { areas: AreaSummary[]; loading: boolean }) {
+function AreaList({
+  areas,
+  loading,
+  error,
+}: {
+  areas: AreaSummary[];
+  loading: boolean;
+  error: Error | null;
+}) {
   const pathname = usePathname();
 
   if (loading) return <p className="px-2 text-xs text-ink-faint">Loading areas…</p>;
+
+  /**
+   * A read that failed, said as a failure (issue #57).
+   *
+   * The empty state below is a statement about the account's directory groups,
+   * and FA-01.4 is the requirement that says so. A failed areas call is not
+   * evidence for it: the entitlement may be perfectly correct and the control
+   * plane simply not answering. Rendering the empty state here turns an outage
+   * into "none of your groups is entitled to an area yet, ask whoever
+   * maintains the group mapping" — advice to go and repair something that is
+   * not broken, on the strength of an answer that never arrived.
+   *
+   * The area page and the run history already keep these two apart; this is
+   * the same split with the same shape of message.
+   */
+  if (error) {
+    return (
+      <div className="rounded-[var(--radius-panel)] border border-line bg-surface px-3 py-3">
+        <p className="text-xs font-medium text-ink">Could not load the areas</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
+          {error instanceof ApiFailure ? error.message : "The control plane did not answer."}
+        </p>
+      </div>
+    );
+  }
 
   if (areas.length === 0) {
     /**
