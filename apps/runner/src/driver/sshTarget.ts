@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { Client, type ClientChannel, type FileEntryWithStats, type SFTPWrapper } from "ssh2";
+import { Client, utils, type ClientChannel, type FileEntryWithStats, type SFTPWrapper } from "ssh2";
 import { loadRunnerConfig } from "@scriptoria/config";
 import type { AbortStage } from "@scriptoria/contracts";
 import {
@@ -189,13 +189,21 @@ export class SshExecutionTarget implements ExecutionTarget {
    * The executable bit is read here rather than taken from the catalog, because
    * whether a script can start itself is a fact about the file right now — and
    * the catalog is a cache of what it looked like at the last scan.
+   *
+   * `null` means the path is not there, and nothing else. Every other failure —
+   * a permission the service account lacks, a connection that went away
+   * mid-request — is a read that failed, and is reported as one. Answering
+   * `null` for those is what turned an existing result file into a `not_found`
+   * for the operator (FA-09.2) and a script that is on the VM into one that had
+   * "gone" (FA-03.3).
    */
   async stat(path: string): Promise<FileFacts | null> {
     const sftp = await this.sftp();
-    return new Promise<FileFacts | null>((resolve) => {
+    return new Promise<FileFacts | null>((resolve, reject) => {
       sftp.stat(path, (error, stats) => {
-        if (error || !stats) {
-          resolve(null);
+        if (error) {
+          if (isMissing(error)) resolve(null);
+          else reject(error);
           return;
         }
         resolve({
@@ -216,18 +224,22 @@ export class SshExecutionTarget implements ExecutionTarget {
     const entries: DirectoryEntry[] = [];
     let truncated = false;
 
+    /** One directory read. A rejection when the server would not give it. */
+    const readDirectory = (absolute: string): Promise<FileEntryWithStats[]> =>
+      new Promise<FileEntryWithStats[]>((resolve, reject) => {
+        sftp.readdir(absolute, (error, list) => (error ? reject(error) : resolve(list)));
+      });
+
     const walk = async (absolute: string, relative: string, depth: number): Promise<void> => {
       if (truncated) return;
 
-      const listed = await new Promise<FileEntryWithStats[]>((resolve, reject) => {
-        sftp.readdir(absolute, (error, list) => (error ? reject(error) : resolve(list)));
-      }).catch((cause: unknown) => {
-        // A directory the service account cannot read is a fact about the VM,
-        // not a failure of the listing. The rest of the result set is still
-        // worth having (FA-09.5).
-        log.debug("could not read a directory", { path: absolute, error: describeError(cause) });
-        return [];
-      });
+      // No catch here, and deliberately so: at depth 0 this is the read the
+      // caller asked for. Answering `[]` for a directory the account could not
+      // read is how one bad SFTP read came back as "this area has no scripts"
+      // and emptied the catalogue (FA-03.3, FA-09.1) — the caller cannot tell a
+      // failed read from a directory that is genuinely empty, and the control
+      // plane believes `[]`.
+      const listed = await readDirectory(absolute);
 
       for (const item of listed) {
         if (entries.length >= maxEntries) {
@@ -240,7 +252,21 @@ export class SshExecutionTarget implements ExecutionTarget {
         const attrs = item.attrs;
 
         if (attrs.isDirectory()) {
-          if (depth < maxDepth) await walk(childAbsolute, childRelative, depth + 1);
+          if (depth < maxDepth) {
+            try {
+              await walk(childAbsolute, childRelative, depth + 1);
+            } catch (cause) {
+              // A subdirectory *within* the walk is a different thing: a
+              // date-stamped result folder the account cannot read is a fact
+              // about the VM, not a failure of the listing, and the rest of the
+              // result set is still worth having — the result has to be visible
+              // even for a run that failed (FA-09.5).
+              log.debug("could not read a subdirectory", {
+                path: childAbsolute,
+                error: describeError(cause),
+              });
+            }
+          }
           continue;
         }
         if (!attrs.isFile()) continue;
@@ -469,6 +495,19 @@ export class SshExecutionTarget implements ExecutionTarget {
       });
     });
   }
+}
+
+/**
+ * Whether the SFTP server said "not there" rather than "I could not read it".
+ *
+ * ssh2 puts the SSH_FX status code on the error, and only NO_SUCH_FILE means the
+ * path is absent. Everything else — PERMISSION_DENIED, CONNECTION_LOST, a
+ * request against a dead channel — is a read that failed and must be reported as
+ * one, or an existing file is answered as a missing one.
+ */
+function isMissing(cause: unknown): boolean {
+  const code = (cause as { code?: unknown } | null | undefined)?.code;
+  return code === utils.sftp.STATUS_CODE.NO_SUCH_FILE || code === "ENOENT";
 }
 
 /** Opens a connection and hands it over ready to use. */
