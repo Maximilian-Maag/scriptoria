@@ -108,6 +108,15 @@ export interface ExecutionTarget {
   /** Starts the script on a PTY, in its own process group (ADR-003). */
   start(spec: StartSpec): Promise<RunningScript>;
 
+  /**
+   * Every file beneath a directory, with the ceilings the caller sets.
+   *
+   * A directory within the walk that cannot be read is skipped, because the rest
+   * of a result set is still worth having (FA-09.5). The directory *named here*
+   * is not: if that read fails this rejects, because `[]` is a truthful answer
+   * only for a directory that is genuinely empty, and a caller told "empty"
+   * cannot tell the difference (FA-09.1).
+   */
   list(directory: string, options?: ListOptions): Promise<Listing>;
 
   /** The first bytes of a file — ADR-004's header block, never the body. */
