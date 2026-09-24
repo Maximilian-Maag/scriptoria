@@ -8,16 +8,6 @@ import { StagedAbort } from "./abort";
 import { Transcript } from "./transcript";
 import { describeError, log } from "../log";
 
-/**
- * One run, from a claimed job to a terminal state.
- *
- * The order of what happens here is the product's promise, in sequence:
- * connect, open a terminal, stream every byte both ways, stop when asked, and
- * then — whatever the exit code was — record what the script left behind.
- * FA-09.5 is explicit that a failed run still has results, because a partial
- * result is evidence about what the run managed to do.
- */
-
 /** How often the claim is renewed while the script is running. */
 const CLAIM_RENEWAL_MS = 20_000;
 
@@ -27,7 +17,41 @@ export interface RunContext {
   renewClaim: () => Promise<void>;
 }
 
+/**
+ * The last line of defence, and the reason it is here rather than in the job
+ * consumer: once a job has been claimed, a run that nobody carries to a
+ * terminal state is a run nothing will ever pick up again. The job has already
+ * been consumed from the queue, the claim is released as the worker unwinds,
+ * and the reaper only looks at runs somebody opens — where a database blip
+ * would be called `worker_lost`, which is a worse description of what happened
+ * than this one (FA-05).
+ */
 export async function executeRun(runId: string, context: RunContext): Promise<void> {
+  try {
+    await runOnce(runId, context);
+  } catch (cause) {
+    log.error("the run could not be carried out", { runId, error: describeError(cause) });
+    await fail(runId, "start_failed", describeError(cause)).catch((unrecorded: unknown) => {
+      // With the database unreachable there is nowhere to record that the run
+      // never started. This line is then the only trace there will be.
+      log.error("could not record that the run failed to start", {
+        runId,
+        error: describeError(unrecorded),
+      });
+    });
+  }
+}
+
+/**
+ * One run, from a claimed job to a terminal state.
+ *
+ * The order of what happens here is the product's promise, in sequence:
+ * connect, open a terminal, stream every byte both ways, stop when asked, and
+ * then — whatever the exit code was — record what the script left behind.
+ * FA-09.5 is explicit that a failed run still has results, because a partial
+ * result is evidence about what the run managed to do.
+ */
+async function runOnce(runId: string, context: RunContext): Promise<void> {
   const run = await runRepository.findRunById(runId);
   if (!run) {
     log.warn("queued run has no record", { runId });
