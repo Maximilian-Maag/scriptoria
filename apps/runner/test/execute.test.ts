@@ -109,6 +109,8 @@ interface DbState {
   findRunThrows: boolean;
   /** Set to make every write fail, the way an unreachable database does. */
   transitionThrows: boolean;
+  /** Set to make the script the run names no longer be in the catalog. */
+  scriptMissing: boolean;
   /** FA-12 audit entries the runner wrote, in order. */
   audit: Record<string, unknown>[];
 }
@@ -128,6 +130,7 @@ vi.mock("@scriptoria/db", async () => {
     saveTranscriptThrows: false,
     findRunThrows: false,
     transitionThrows: false,
+    scriptMissing: false,
     audit: [],
   };
   (globalThis as Record<string, unknown>)[DB] = db;
@@ -169,19 +172,22 @@ vi.mock("@scriptoria/db", async () => {
       },
     },
     scriptRepository: {
-      findScriptWithSource: async () => ({
-        script: {
-          id: "22222222-2222-4222-8222-222222222222",
-          fileName: "nightly.sh",
-          absolutePath: "/opt/scriptoria/scripts/nightly.sh",
-        },
-        source: {
-          host: "vm1.example.test",
-          port: 22,
-          username: "scriptoria",
-          scriptPath: "/opt/scriptoria/scripts",
-        },
-      }),
+      findScriptWithSource: async () => {
+        if (db.scriptMissing) return null;
+        return {
+          script: {
+            id: "22222222-2222-4222-8222-222222222222",
+            fileName: "nightly.sh",
+            absolutePath: "/opt/scriptoria/scripts/nightly.sh",
+          },
+          source: {
+            host: "vm1.example.test",
+            port: 22,
+            username: "scriptoria",
+            scriptPath: "/opt/scriptoria/scripts",
+          },
+        };
+      },
     },
     resultRepository: {
       recordResults: async (_runId: string, files: { path: string }[]) => {
@@ -295,9 +301,11 @@ function fresh(): ScriptState {
   db.saveTranscriptThrows = false;
   db.findRunThrows = false;
   db.transitionThrows = false;
+  db.scriptMissing = false;
   db.audit = [];
   db.run = {
     id: RUN_ID,
+    areaId: "33333333-3333-4333-8333-333333333333",
     scriptId: "22222222-2222-4222-8222-222222222222",
     status: "queued",
     cols: 80,
@@ -305,6 +313,7 @@ function fresh(): ScriptState {
     outputPath: "/opt/scriptoria/export",
     scriptFileName: "nightly.sh",
     startedBy: "admin",
+    host: "vm1.example.test",
   };
   started.length = 0;
 
@@ -497,5 +506,68 @@ describe("executeRun", () => {
     expect(script.signals).toEqual(["sigint", "sigterm", "sigkill"]);
     expect(db().status).toBe("aborted");
     expect(db().transitions.at(-1)?.patch.failureReason).toBe("aborted_by_user");
+    // FA-12.1: an abort is an outcome too, and this is the row that says so —
+    // a decision, recorded as one, with the stage it reached (ADR-003).
+    expect(db().audit.at(-1)).toMatchObject({
+      action: "run_finished",
+      outcome: "success",
+      detail: { status: "aborted", failureReason: "aborted_by_user", abortStage: "sigkill" },
+    });
+  });
+
+  /**
+   * FA-12.1's "with which outcome". `run_finished` is in the audit vocabulary
+   * beside `run_started`, and nothing anywhere wrote one: a run's fate reached
+   * the trail only as the fact that it had been started, plus a status row the
+   * platform itself can still change.
+   */
+  it("records how the run ended, not only that it started", async () => {
+    const script = fresh();
+
+    const done = executeRun(RUN_ID, WORKER);
+    await running();
+
+    script.resolveExit({ code: 3, signal: null });
+    await done;
+
+    expect(db().audit).toEqual([
+      {
+        actor: "admin",
+        action: "run_finished",
+        subject: "nightly.sh",
+        areaId: "33333333-3333-4333-8333-333333333333",
+        runId: RUN_ID,
+        outcome: "failure",
+        detail: {
+          status: "failed",
+          exitCode: 3,
+          failureReason: "exit_code",
+          abortStage: null,
+          host: "vm1.example.test",
+        },
+        sourceIp: null,
+      },
+    ]);
+  });
+
+  /**
+   * A run that never started has an outcome too, and it is the one an operator
+   * is most likely to go looking for afterwards.
+   */
+  it("records a run that never started as a failure in the trail", async () => {
+    fresh();
+    db().scriptMissing = true;
+
+    await executeRun(RUN_ID, WORKER);
+
+    expect(db().audit).toHaveLength(1);
+    expect(db().audit[0]).toMatchObject({
+      actor: "admin",
+      action: "run_finished",
+      subject: "nightly.sh",
+      runId: RUN_ID,
+      outcome: "failure",
+      detail: { status: "failed", failureReason: "start_failed" },
+    });
   });
 });
