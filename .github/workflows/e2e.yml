@@ -1,0 +1,160 @@
+name: End-to-end
+
+# Pull requests only, for the reason CI gives: a push to dev, staging or main is
+# a merge of something these jobs have already passed, and the branch
+# protections are what make that true — not this file.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A second push to the same branch makes the first run's answer worthless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── One job per requirement ──────────────────────────────────────────────────
+  #
+  # Its own workflow rather than a leg of `Test`, because its failure modes are
+  # infrastructural as often as behavioural — a fixture that did not come up, a
+  # browser that did not install — and a red end-to-end job must not read as
+  # "the unit tests are broken".
+  #
+  # One job per requirement, each running that requirement's spec file, so the
+  # check that goes red *names the requirement it belongs to*: a pull request
+  # that breaks FA-08.3 fails "E2E (FA-08 stopping a script)", and nobody has to
+  # open a five-minute log to find out which behaviour moved. The specs are
+  # already one file per requirement for exactly this reason.
+  #
+  # The suite is serial within a job by design (e2e/playwright.config.ts): every
+  # spec drives the same estate — one area, one script-VM fixture, one crontab,
+  # one export directory — so two specs in parallel would be editing one crontab
+  # at the same time. Parallelism comes from the matrix, not from workers.
+  #
+  # `fail-fast: false` for the same reason the test matrix has it: knowing about
+  # two broken requirements is worth more than stopping at the first.
+  e2e-matrix:
+    name: E2E (${{ matrix.requirement }})
+    runs-on: ubuntu-latest
+    # Generous: the suite itself takes about five minutes, and the stack has to
+    # come up and Chromium has to be installed before any of it runs.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - requirement: the stack the suite runs against
+            slug: preflight
+            spec: tests/00-preflight.spec.ts
+          - requirement: FA-01 login and FA-02 authorisation
+            slug: fa-01
+            spec: tests/01-login.spec.ts
+          - requirement: FA-03 overview and FA-04 selection
+            slug: fa-03
+            spec: tests/02-overview.spec.ts
+          - requirement: FA-05 execution and FA-07 terminal output
+            slug: fa-05
+            spec: tests/03-execution.spec.ts
+          - requirement: FA-06 script interaction
+            slug: fa-06
+            spec: tests/04-interaction.spec.ts
+          - requirement: FA-08 stopping a script
+            slug: fa-08
+            spec: tests/05-stop.spec.ts
+          - requirement: FA-09 result provisioning
+            slug: fa-09
+            spec: tests/06-results.spec.ts
+          - requirement: FA-10 recurring scripts
+            slug: fa-10
+            spec: tests/07-schedules.spec.ts
+          - requirement: FA-11 area administration
+            slug: fa-11
+            spec: tests/08-admin.spec.ts
+          - requirement: FA-12 audit
+            slug: fa-12
+            spec: tests/09-audit.spec.ts
+          - requirement: NFR-18 isolation between areas
+            slug: nfr-18
+            spec: tests/10-isolation.spec.ts
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      # The documented first step of a new checkout, and the one the suite
+      # insists on: with neither a `.env` nor an SSH host-key setting in the
+      # environment the applications start with their *production* defaults — the
+      # runner refuses to start without a known_hosts file and `Secure` session
+      # cookies are dropped by the browser over plain http, so signing in appears
+      # to do nothing. Every value in the example matches the dev stack, and none
+      # of them is a secret (the file says so itself). The suite exports its own
+      # DATABASE_URL on top, which is what points the applications at
+      # `scriptoria_e2e` rather than the database a developer is looking at.
+      - name: Write the development environment file
+        run: cp .env.example .env
+
+      # Before the stack, not after: the sshd fixture mounts this keypair, and
+      # `docker compose up` refuses a bind source that does not exist.
+      - name: Generate the dev SSH keypair
+        run: make fixtures-key
+
+      # Postgres, Redis, the directory fixture and the script-VM fixture, on the
+      # ports the suite's own defaults expect (5433, 6379, 1389, 2222). The
+      # three application processes are started by the suite itself — a suite
+      # that tests whatever happens to be listening on :3000 is a suite that
+      # reports success about somebody's stale build.
+      - name: Start the dev stack
+        run: make dev
+
+      # Keyed on the package manifest, so changing Playwright's version buys a
+      # new browser rather than a stale one.
+      - name: Cache the browser download
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('e2e/package.json') }}
+          restore-keys: ${{ runner.os }}-playwright-
+
+      # --with-deps because a fresh runner has none of Chromium's own libraries.
+      # It is idempotent, so a restored cache still passes through here.
+      - name: Install Chromium
+        run: pnpm --filter e2e exec playwright install --with-deps chromium
+
+      # Through the Makefile, exactly as a developer runs it, so CI and a
+      # developer's machine cannot drift into running different commands. The
+      # target migrates and seeds the suite's own database (scriptoria_e2e)
+      # first, which is what keeps each of these jobs independent of the others.
+      - name: ${{ matrix.requirement }}
+        run: make test-e2e E2E_SPECS=${{ matrix.spec }}
+
+      # The trace is `retain-on-failure` and CI retries once, which together are
+      # the only way a flake on a distributed runner is answerable afterwards.
+      - name: Keep the report and the traces
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-${{ matrix.slug }}
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          retention-days: 7
+
+  # The name branch protection knows. It stays green or red with the legs, so
+  # the matrix can gain a requirement — or lose one — without anybody having to
+  # edit a protection rule before it gates anything again. Same arrangement as
+  # `Test` in ci.yml, deliberately: one shape for "a matrix behind a stable
+  # required check".
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    needs: [e2e-matrix]
+    if: always()
+    steps:
+      - name: Report the matrix result
+        run: |
+          echo "e2e-matrix: ${{ needs.e2e-matrix.result }}"
+          [ "${{ needs.e2e-matrix.result }}" = "success" ]
