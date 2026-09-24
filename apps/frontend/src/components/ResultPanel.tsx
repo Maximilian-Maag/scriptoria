@@ -23,6 +23,11 @@ import { ResultPreviewDialog } from "./ResultPreviewDialog";
  * the exit code ends the run, it does not decide whether what the run produced
  * is worth seeing. A partial result is evidence about what the run managed to
  * do before it stopped.
+ *
+ * FA-09.5 also decides what the panel may *not* say. "This run wrote nothing"
+ * is a claim about the run, and it is only available once the output directory
+ * has actually been read — so a failed results call is reported as a failed
+ * call, not as an empty run (issue #57).
  */
 export function ResultPanel({ run }: { run: Run }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -85,6 +90,21 @@ export function ResultPanel({ run }: { run: Run }) {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* A read that failed is said as a failure (#57), and what is already on
+            screen stays on screen: a *refetch* that fails leaves the last
+            successful response in `results.data`, so these files can be real
+            while the read that just failed is real too. Taking them away would
+            hide output FA-09.5 keeps visible; the empty state is a claim about
+            the run and stays for a read that succeeded and came back empty. */}
+        {results.isError ? (
+          <ErrorState
+            detail={
+              results.error instanceof ApiFailure
+                ? results.error.message
+                : "The control plane did not answer."
+            }
+          />
+        ) : null}
         {files.length > 0 ? (
           <ul className="divide-y divide-line">
             {files.map((file) => (
@@ -132,7 +152,7 @@ export function ResultPanel({ run }: { run: Run }) {
               </li>
             ))}
           </ul>
-        ) : (
+        ) : results.isError ? null : (
           <EmptyState finished={run.finishedAt !== null} />
         )}
       </div>
@@ -180,6 +200,26 @@ export function ResultPanel({ run }: { run: Run }) {
         <ResultPreviewDialog runId={run.id} path={previewing} onClose={() => setPreviewing(null)} />
       ) : null}
     </aside>
+  );
+}
+
+/**
+ * A read that failed, said as a failure (issue #57).
+ *
+ * `EmptyState` below is a claim about the run — that the output directory was
+ * listed and it was empty — and FA-09.5 is the requirement that keeps results
+ * visible for a failed run. A failed call is not evidence for that claim:
+ * rendering it as "This run wrote nothing into its output directory" reports an
+ * outage as a negative result, and the operator concludes the script produced
+ * nothing when in fact nobody managed to ask. The area page and the run history
+ * answer a failed read the same way.
+ */
+function ErrorState({ detail }: { detail: string }) {
+  return (
+    <div className="px-5 py-4">
+      <p className="text-[13px] text-ink">Could not read the results</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">{detail}</p>
+    </div>
   );
 }
 
