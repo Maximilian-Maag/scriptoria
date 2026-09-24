@@ -97,6 +97,10 @@ interface DbState {
   run: Record<string, unknown>;
   /** Set to make the next transcript write fail, which is what #53 is about. */
   saveTranscriptThrows: boolean;
+  /** Set to make the run's first read fail, the way a database blip does. */
+  findRunThrows: boolean;
+  /** Set to make every write fail, the way an unreachable database does. */
+  transitionThrows: boolean;
   /** FA-12 audit entries the runner wrote, in order. */
   audit: Record<string, unknown>[];
 }
@@ -114,6 +118,8 @@ vi.mock("@scriptoria/db", async () => {
     resultCount: [],
     run: {},
     saveTranscriptThrows: false,
+    findRunThrows: false,
+    transitionThrows: false,
     audit: [],
   };
   (globalThis as Record<string, unknown>)[DB] = db;
@@ -122,13 +128,17 @@ vi.mock("@scriptoria/db", async () => {
     // `executeRun` imports this for the row types only.
     schema: {},
     runRepository: {
-      findRunById: async () => db.run,
+      findRunById: async () => {
+        if (db.findRunThrows) throw new Error("the database is not answering");
+        return db.run;
+      },
       transition: async (
         _id: string,
         to: string,
         patch: Record<string, unknown> = {},
         from?: readonly string[],
       ) => {
+        if (db.transitionThrows) throw new Error("the database is not answering");
         const accepted = from === undefined || from.includes(db.status);
         db.transitions.push({ to, patch, accepted });
         if (accepted) db.status = to;
@@ -274,6 +284,8 @@ function fresh(): ScriptState {
   db.collected = [];
   db.resultCount = [];
   db.saveTranscriptThrows = false;
+  db.findRunThrows = false;
+  db.transitionThrows = false;
   db.audit = [];
   db.run = {
     id: RUN_ID,
@@ -342,5 +354,44 @@ describe("executeRun", () => {
     expect(db().events.map((e) => `${e.kind}: ${e.message}`)).toContain(
       "error: Transcript not persisted: Error: the transcript insert failed",
     );
+  });
+
+  /**
+   * A run whose start throws is consumed and forgotten: the job is gone from the
+   * queue, the claim is released as the worker unwinds, and the run's row is
+   * left where the last write put it. Nothing retries it, and an operator is
+   * shown a run that is still starting for ever (FA-05).
+   *
+   * The throw is the first read, which is what a database briefly not answering
+   * looks like from here — and it is the case the record can still be corrected
+   * for, because every later write succeeds.
+   */
+  it("records a failed start rather than leaving the run where it was", async () => {
+    fresh();
+    db().findRunThrows = true;
+
+    await executeRun(RUN_ID, WORKER);
+
+    expect(db().status).toBe("failed");
+    expect(db().transitions.map((t) => `${t.to}/${String(t.patch.failureReason)}`)).toEqual([
+      "failed/start_failed",
+    ]);
+    expect(db().events.map((e) => `${e.kind}: ${e.message}`)).toEqual([
+      "error: Error: the database is not answering",
+    ]);
+  });
+
+  /**
+   * And when the database is not answering at all there is nowhere to write that
+   * correction. The run's row is beyond saving then, but the worker's queue slot
+   * is not: rejecting here would unwind through the consumer, and a consumer
+   * that stops consuming looks exactly like a platform where nothing starts.
+   */
+  it("does not throw out of the worker when nothing can be recorded", async () => {
+    fresh();
+    db().findRunThrows = true;
+    db().transitionThrows = true;
+
+    await expect(executeRun(RUN_ID, WORKER)).resolves.toBeUndefined();
   });
 });
