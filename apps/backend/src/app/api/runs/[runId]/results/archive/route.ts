@@ -1,4 +1,5 @@
 import { resultArchiveRequestSchema } from "@scriptoria/contracts";
+import { sanitiseFileName } from "@scriptoria/core";
 import { archiveResults } from "@/lib/services/resultService";
 import { clientIp, parseBody, parsePath, requireSession } from "@/lib/http";
 import { toResponse } from "@/lib/result";
@@ -42,7 +43,12 @@ export async function POST(
   return new Response(archive, {
     headers: new Headers({
       "content-type": "application/zip",
-      "content-disposition": `attachment; filename="${name.replaceAll('"', "")}"`,
+      // The service derives the name from the script's, which is whatever the
+      // catalog scan recorded from the script VM. Sanitised here as well,
+      // because this is where it becomes a header value and `Headers` refuses
+      // a newline or anything outside Latin-1 by throwing — a non-Latin-1
+      // script name would otherwise turn the whole ZIP into a 500.
+      "content-disposition": `attachment; filename="${sanitiseFileName(name)}"`,
       // No content-length: the compressed size is not known until the last
       // entry is written, and a wrong one is worse than none.
       "cache-control": "no-store",
