@@ -1,5 +1,11 @@
-import type { AbortStage, RunFailureReason } from "@scriptoria/contracts";
-import { resultRepository, runRepository, schema, scriptRepository } from "@scriptoria/db";
+import type { AbortStage, RunFailureReason, RunStatus } from "@scriptoria/contracts";
+import {
+  auditRepository as audit,
+  resultRepository,
+  runRepository,
+  schema,
+  scriptRepository,
+} from "@scriptoria/db";
 import { connectTo } from "../driver/sshTarget";
 import type { DirectoryEntry, ExecutionTarget } from "../driver/executionTarget";
 import { StreamPublisher } from "../stream/publisher";
@@ -71,7 +77,7 @@ async function runOnce(runId: string, context: RunContext): Promise<void> {
 
   const script = await scriptRepository.findScriptWithSource(run.scriptId);
   if (!script) {
-    await fail(runId, "start_failed", "The script is no longer in the catalog");
+    await fail(runId, "start_failed", "The script is no longer in the catalog", run);
     return;
   }
 
@@ -88,7 +94,12 @@ async function runOnce(runId: string, context: RunContext): Promise<void> {
       host: script.source.host,
       error: describeError(cause),
     });
-    await fail(runId, "connect_failed", `Could not reach ${script.source.host}: ${describeError(cause)}`);
+    await fail(
+      runId,
+      "connect_failed",
+      `Could not reach ${script.source.host}: ${describeError(cause)}`,
+      run,
+    );
     return;
   }
 
@@ -98,7 +109,7 @@ async function runOnce(runId: string, context: RunContext): Promise<void> {
     await drive(run, script, target, context);
   } catch (cause) {
     log.error("run failed", { runId, error: describeError(cause) });
-    await fail(runId, "connection_lost", describeError(cause));
+    await fail(runId, "connection_lost", describeError(cause), run);
   } finally {
     await target.cleanup(runId).catch(() => {});
     target.close();
@@ -120,7 +131,12 @@ async function drive(
 
   const facts = await target.stat(script.script.absolutePath);
   if (!facts) {
-    await fail(runId, "start_failed", `${script.script.absolutePath} is not there any more`);
+    await fail(
+      runId,
+      "start_failed",
+      `${script.script.absolutePath} is not there any more`,
+      run,
+    );
     return;
   }
 
@@ -223,6 +239,13 @@ async function drive(
       exit.signal ? `Killed by ${exit.signal}` : `Exited ${exit.code ?? "unknown"}`,
     );
 
+    await recordOutcome(run, {
+      status,
+      exitCode: exit.code,
+      failureReason,
+      abortStage: abort.stage,
+    });
+
     // FA-07.2: the durable copy of the scrollback, so the capped stream may
     // expire without taking the history with it.
     //
@@ -321,7 +344,12 @@ async function collect(
   }
 }
 
-async function fail(runId: string, reason: RunFailureReason, message: string): Promise<void> {
+async function fail(
+  runId: string,
+  reason: RunFailureReason,
+  message: string,
+  run: schema.RunRow | null = null,
+): Promise<void> {
   await runRepository.transition(
     runId,
     "failed",
@@ -329,4 +357,63 @@ async function fail(runId: string, reason: RunFailureReason, message: string): P
     ["queued", "starting", "running"],
   );
   await runRepository.appendEvent(runId, "error", message);
+
+  // A run that never started is still a run, and FA-12.1 asks for its outcome
+  // as much as for any other's. The row is missing only where the worker could
+  // not read it at all, which is the case the caller has nothing to write from
+  // either.
+  if (run) {
+    await recordOutcome(run, {
+      status: "failed",
+      exitCode: null,
+      failureReason: reason,
+      abortStage: null,
+    });
+  }
+}
+
+/**
+ * FA-12.1's other half, and the half that had no writer at all.
+ *
+ * *"Every run is recorded in full: who started what, where, when, with which
+ * outcome."* `run_started` carries the first four. The fifth was in the
+ * vocabulary — `run_finished` sits next to `run_started` and `run_aborted` in
+ * `auditActionSchema` — and nothing anywhere produced one, so the one question
+ * an audit trail exists to answer about a script that touched the estate, *did
+ * it finish and how*, was answered only by `runs.status`: the operational
+ * record, and still mutable by a later transition.
+ *
+ * Written from here because this is the process that knows. It holds the exit
+ * code and writes the transition that ends the run, and the operator who
+ * started it is on the run record (FA-12.1) that it read to do so.
+ *
+ * `sourceIp` is null, deliberately: the source address belongs to the request
+ * that started the run and this process never saw that request — `run_started`
+ * carries it, and inventing one here would be worse than leaving it out.
+ */
+async function recordOutcome(
+  run: schema.RunRow,
+  outcome: {
+    status: RunStatus;
+    exitCode: number | null;
+    failureReason: RunFailureReason | null;
+    abortStage: AbortStage | null;
+  },
+): Promise<void> {
+  await audit.record({
+    actor: run.startedBy,
+    action: "run_finished",
+    subject: run.scriptFileName,
+    areaId: run.areaId,
+    runId: run.id,
+    outcome: outcome.status === "failed" ? "failure" : "success",
+    detail: {
+      status: outcome.status,
+      exitCode: outcome.exitCode,
+      failureReason: outcome.failureReason,
+      abortStage: outcome.abortStage,
+      host: run.host,
+    },
+    sourceIp: null,
+  });
 }
