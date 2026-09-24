@@ -85,6 +85,18 @@ export default defineConfig({
     url: `${BASE_URL}/login`,
     reuseExistingServer: !CI,
     timeout: 240_000,
+    /**
+     * The three applications' own output, forwarded rather than dropped.
+     *
+     * Playwright ignores a web server's stdout by default, which is the wrong
+     * default here: these are three processes whose *whole* job is to say what
+     * they are doing, and the failure that costs the most time is the one where
+     * one of them never got going. A runner that fails at startup has no port to
+     * poll and no request to answer, so the only place it ever says so is its own
+     * log — and with this off, a job fails three assertions later with a 502 that
+     * names the wrong component.
+     */
+    stdout: "pipe",
     env: {
       // The child processes inherit this suite's environment, which is how an
       // operator points a run at a deployment: set DATABASE_URL, REDIS_URL,
