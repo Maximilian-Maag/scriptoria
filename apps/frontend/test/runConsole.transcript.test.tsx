@@ -31,12 +31,25 @@ import RunPage from "../src/app/(app)/runs/[runId]/page";
  * is where the browser would meet it.
  */
 
+/**
+ * What the page hands the view: the decision under test, and the bytes it
+ * decided to show. Recorded rather than rendered — xterm wants a terminal with
+ * a size to measure, and what is under test here is which source the page
+ * chose, not what it printed.
+ */
+const handedToTerminal: { live: boolean; transcript: Uint8Array | null }[] = [];
+
 vi.mock("../src/components/TerminalView", async (importOriginal) => {
-  // xterm wants a terminal with a size to measure. What is under test is which
-  // source the page hands it, so the view is dropped and `isLive` — the rule the
-  // page reads its decision through — is kept real rather than restated here.
+  // `isLive` — the rule the page reads its decision through — is kept real
+  // rather than restated here.
   const actual = await importOriginal<typeof import("../src/components/TerminalView")>();
-  return { ...actual, TerminalView: () => null };
+  return {
+    ...actual,
+    TerminalView: (props: { live: boolean; transcript: Uint8Array | null }) => {
+      handedToTerminal.push(props);
+      return null;
+    },
+  };
 });
 
 vi.mock("next/navigation", () => ({
@@ -75,7 +88,7 @@ function json(body: unknown): Response {
 }
 
 /** The run the control plane answers with, and every path the page asked for. */
-function answering(answer: Run): string[] {
+function answering(answer: Run, transcript = "UmVhZGluZyBpbnRlcmZhY2Vz"): string[] {
   const asked: string[] = [];
   vi.stubGlobal(
     "fetch",
@@ -84,7 +97,7 @@ function answering(answer: Run): string[] {
       asked.push(path);
       if (path === `/runs/${RUN_ID}`) return json(answer);
       if (path === `/runs/${RUN_ID}/transcript`)
-        return json({ contentBase64: "UmVhZGluZyBpbnRlcmZhY2Vz", truncated: false });
+        return json({ contentBase64: transcript, truncated: false });
       return new Response("", { status: 404 });
     }),
   );
@@ -113,6 +126,7 @@ async function open(seeded?: Run): Promise<QueryClient> {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  handedToTerminal.length = 0;
 });
 
 describe("where the run console's terminal gets its content (FA-07.2)", () => {
@@ -144,5 +158,25 @@ describe("where the run console's terminal gets its content (FA-07.2)", () => {
     // in under it would print the run a second time under itself.
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(asked.filter((path) => path.endsWith("/transcript"))).toEqual([]);
+  });
+
+  it("shows an empty terminal for a run that printed nothing, and does not call it an error (FA-07.5)", async () => {
+    // A script that produced no output and a console that failed to read the
+    // output look the same on a black screen. FA-07.5 is the first of those: the
+    // durable copy *is* read — the assertion below is that it was asked for —
+    // and it is empty, which is a fact about the run rather than a failure of
+    // the read. Two things make that legible: the console decided to read the
+    // run back instead of attaching a socket to it, and the status line above
+    // the silence still says the run finished.
+    const asked = answering(run("succeeded"), "");
+
+    await open();
+
+    await waitFor(() => expect(asked).toContain(`/runs/${RUN_ID}/transcript`));
+    expect(handedToTerminal.at(-1)?.live, "a finished run is read back, not streamed").toBe(false);
+
+    const shown = document.body.textContent ?? "";
+    expect(shown).toContain("Finished");
+    expect(shown).not.toMatch(/could not|not available|failed to|went wrong|error/i);
   });
 });
