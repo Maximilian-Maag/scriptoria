@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
-import type { RunStatus, StreamStatus } from "@scriptoria/contracts";
+import { isLiveStatus, type StreamStatus } from "@scriptoria/contracts";
 import { useTerminalStream } from "@/lib/terminal/useTerminalStream";
 
 /**
@@ -96,7 +96,10 @@ export function TerminalView({
     terminal.write(transcript);
   }, [terminal, transcript]);
 
-  const stream = useTerminalStream(terminal, runId, { enabled: live, ...(onStatus ? { onStatus } : {}) });
+  const stream = useTerminalStream(terminal, runId, {
+    enabled: live,
+    ...(onStatus ? { onStatus } : {}),
+  });
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-[var(--radius-panel)] border border-line bg-terminal-bg">
@@ -124,5 +127,11 @@ function ConnectionDot({ connected }: { connected: boolean }) {
   );
 }
 
-export const isLive = (status: RunStatus): boolean =>
-  status === "queued" || status === "starting" || status === "running";
+/**
+ * Whether a run is still going — which is what decides where this view's bytes
+ * come from: a socket while it is, the durable transcript once it is not
+ * (FA-07.2). The classification is the contract's, and not a list kept here:
+ * it is a shared rule, and a second copy of it in the interface is one that can
+ * disagree with the state machine it is describing.
+ */
+export const isLive = isLiveStatus;

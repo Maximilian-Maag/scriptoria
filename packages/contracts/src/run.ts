@@ -22,11 +22,30 @@ export const runStatusSchema = z.enum([
 ]);
 export type RunStatus = z.infer<typeof runStatusSchema>;
 
-export const TERMINAL_RUN_STATUSES = ["succeeded", "failed", "aborted"] as const satisfies
-  readonly RunStatus[];
+export const TERMINAL_RUN_STATUSES = [
+  "succeeded",
+  "failed",
+  "aborted",
+] as const satisfies readonly RunStatus[];
 
 export const isTerminalStatus = (status: RunStatus): boolean =>
   (TERMINAL_RUN_STATUSES as readonly string[]).includes(status);
+
+/**
+ * The other half of the classification, named here for the same reason: the two
+ * lists are the state machine, and the console chooses between watching a run
+ * on a socket and reading it back from its transcript on the strength of them
+ * (FA-07.2). A list kept privately in the interface is a second copy of a
+ * shared rule, and the two are allowed to disagree only if nobody is looking.
+ */
+export const LIVE_RUN_STATUSES = [
+  "queued",
+  "starting",
+  "running",
+] as const satisfies readonly RunStatus[];
+
+export const isLiveStatus = (status: RunStatus): boolean =>
+  (LIVE_RUN_STATUSES as readonly string[]).includes(status);
 
 /** Why a run reached a terminal state, when the exit code alone does not say. */
 export const runFailureReasonSchema = z.enum([

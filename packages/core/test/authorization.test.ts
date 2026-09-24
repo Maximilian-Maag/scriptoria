@@ -60,6 +60,20 @@ describe("resolveAreaIds", () => {
     expect(resolveAreaIds(["scriptoria-firewall"], [])).toEqual([]);
   });
 
+  it("takes a group name the directory has never heard of, and entitles nobody until somebody holds it (FA-02.3, NFR-04)", () => {
+    // Groups are *referenced*, never synchronised. What an entitlement stores
+    // is the name, so nothing has to exist in the directory before the mapping
+    // can be written and nothing is copied out of it afterwards: the name
+    // starts working the moment an account carries it, with no synchronisation
+    // step in between and no local inventory to keep true.
+    const unmapped = [{ areaId: "area-new", directoryGroup: "scriptoria-neither" }];
+
+    expect(resolveAreaIds(["scriptoria-branch-network"], unmapped)).toEqual([]);
+    expect(
+      resolveAreaIds(["cn=scriptoria-neither,ou=groups,dc=scriptoria,dc=test"], unmapped),
+    ).toEqual(["area-new"]);
+  });
+
   it("does not duplicate an area entitled through two groups", () => {
     const areas = resolveAreaIds(
       ["scriptoria-firewall", "scriptoria-firewall-leads"],
