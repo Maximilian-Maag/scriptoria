@@ -42,6 +42,8 @@ export {
   contentTypeFor,
   isPreviewable,
   archiveFileName,
+  sanitiseFileName,
+  sanitiseArchiveEntry,
   DEFAULT_CONTENT_TYPE,
   MAX_PREVIEW_BYTES,
 } from "./resultFiles";

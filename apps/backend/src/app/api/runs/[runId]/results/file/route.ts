@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sanitiseFileName } from "@scriptoria/core";
 import { downloadResult } from "@/lib/services/resultService";
 import { clientIp, parsePath, parseQuery, requireSession } from "@/lib/http";
 import { toResponse } from "@/lib/result";
@@ -38,7 +39,12 @@ export async function GET(
     "content-type": contentType,
     // `attachment`, always. A result file is the script owner's content and
     // this platform does not render other people's HTML in its own origin.
-    "content-disposition": `attachment; filename="${name.replaceAll('"', "")}"`,
+    //
+    // The name is the one the script VM reported, so it is sanitised rather
+    // than interpolated: a newline or anything outside Latin-1 is legal in a
+    // file name there and makes this header value invalid, which `Headers`
+    // throws on — one such file would turn its own download into a 500.
+    "content-disposition": `attachment; filename="${sanitiseFileName(name)}"`,
     "cache-control": "no-store",
   });
   if (!header.truncated) headers.set("content-length", String(header.sizeBytes));
