@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Run } from "@scriptoria/contracts";
+import { QUERY_DEFAULTS } from "../src/lib/query";
 import RunPage from "../src/app/(app)/runs/[runId]/page";
 
 /**
@@ -11,15 +12,20 @@ import RunPage from "../src/app/(app)/runs/[runId]/page";
  *
  * The console decides *once*, when it opens, whether the terminal's bytes come
  * from the socket or from the transcript on disk. It decides from the run
- * record it has at that moment — and if that record is the one react-query is
- * still holding from the page that watched this run start, the record says
- * `running` for as long as the refresh takes to come back. The console concludes
- * it is watching a live run, and never reads the transcript back underneath it.
+ * record it has at that moment — and if that record is the one the visit that
+ * watched this run start left behind, it says `running`. The console concludes
+ * it is watching a live run, attaches to a stream that is capped and expires,
+ * and never reads the transcript back underneath it: FA-07.2's read-back
+ * happens to look right while the run is recent (Redis still has the stream and
+ * replays it) and is empty afterwards, which is the whole point of the
+ * requirement.
  *
- * That is only visible on the round trip: watch a run start, leave the console,
- * come back once it has finished. The socket for it is gone and the durable copy
- * was never asked for, so an operator looking at a run with a whole transcript
- * on disk sees an empty terminal.
+ * The tests run with the interface's own query defaults, and that is
+ * load-bearing. `staleTime: 10_000` is longer than a run takes to finish, so on
+ * the way back the cached record is *fresh* and react-query has no reason to
+ * fetch another one — a test client with react-query's defaults refetches on
+ * mount, decides correctly, passes, and tests a different application. That
+ * difference is exactly how this reached CI.
  *
  * Real React and real react-query on jsdom; the wire is faked at `fetch`, which
  * is where the browser would meet it.
@@ -86,7 +92,8 @@ function answering(answer: Run): string[] {
 }
 
 async function open(seeded?: Run): Promise<QueryClient> {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // The interface's own defaults, `staleTime` included: see the note above.
+  const client = new QueryClient({ defaultOptions: { queries: QUERY_DEFAULTS } });
   if (seeded) client.setQueryData(["run", RUN_ID], seeded);
   // `use(params)` suspends on the promise the router hands the page, so the
   // render has to be awaited: without the act scope React never comes back from
