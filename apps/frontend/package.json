@@ -7,7 +7,7 @@
     "dev": "tsx server.ts",
     "build": "next build",
     "start": "NODE_ENV=production tsx server.ts",
-    "lint": "eslint src server.ts",
+    "lint": "eslint src server.ts test",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest"
   },
