@@ -45,11 +45,15 @@ export function escapeFilterValue(value: string): string {
 
 /** RFC 4514 — the same discipline for a value going into a DN. */
 export function escapeDnValue(value: string): string {
-  return value
-    .replace(/([\\,+"<>;=])/g, "\\$1")
-    .replace(/^ /, "\\ ")
-    .replace(/ $/, "\\ ")
-    .replace(/^#/, "\\#");
+  // One pass, with the position-dependent cases anchored inside it. Escaping the
+  // leading space in one pass and the trailing space in the next made the second
+  // pass see the first pass's backslash and escape that same character twice: a
+  // value of a single space came out as `\\ `, which a directory reads back as a
+  // backslash followed by a space. Round-tripping is the whole job here — the
+  // alternative is a login that fails for a username nobody can retype.
+  return value.replace(/[\\,+"<>;=]|^ | $|^#/g, (match) =>
+    match === "\\" ? "\\\\" : `\\${match}`,
+  );
 }
 
 function clientFor(url: string): Client {
