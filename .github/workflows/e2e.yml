@@ -85,6 +85,18 @@ jobs:
 
       - uses: ./.github/actions/setup
 
+      # The documented first step of a new checkout, and the one the suite
+      # insists on: with neither a `.env` nor an SSH host-key setting in the
+      # environment the applications start with their *production* defaults — the
+      # runner refuses to start without a known_hosts file and `Secure` session
+      # cookies are dropped by the browser over plain http, so signing in appears
+      # to do nothing. Every value in the example matches the dev stack, and none
+      # of them is a secret (the file says so itself). The suite exports its own
+      # DATABASE_URL on top, which is what points the applications at
+      # `scriptoria_e2e` rather than the database a developer is looking at.
+      - name: Write the development environment file
+        run: cp .env.example .env
+
       # Before the stack, not after: the sshd fixture mounts this keypair, and
       # `docker compose up` refuses a bind source that does not exist.
       - name: Generate the dev SSH keypair
