@@ -30,10 +30,22 @@ test.describe("running a script (FA-05) and its terminal (FA-07)", () => {
     await openArea(page, REFERENCE_AREA.name);
   });
 
-  test("a non-interactive script runs to the end and is recorded in full (FA-05.4, NFR-22)", async ({
+  test("a non-interactive script runs to the end and is recorded in full (FA-05.1, FA-05.2, FA-05.4, NFR-22)", async ({
     page,
   }) => {
     await selectScript(page, SCRIPTS.inventory.fileName);
+
+    // FA-05.2: the parameter set is in the script, so nothing is asked for
+    // before the start. The panel offers the start and no fields — a form here
+    // would mean an operator had to know the script's parameters to run it,
+    // which is the prior knowledge the requirement removes. What a *script*
+    // declares is requested through dialogue after the start (FA-06), and that
+    // is where the interactive script in 04-interaction is asked about its sites.
+    await expect(page.locator("aside").getByRole("textbox")).toHaveCount(0);
+
+    // FA-05.1: the start runs the selected script in its correct environment —
+    // the area's own directory on the script VM, as the account its mapping
+    // names, rather than anything the browser chose.
     const runId = await startSelectedScript(page);
 
     // FA-07.4: the status line above the terminal says where the run is, what
@@ -86,7 +98,10 @@ test.describe("running a script (FA-05) and its terminal (FA-07)", () => {
         response.url().includes(`/runs/${runId}/transcript`) && response.status() === 200,
       { timeout: 30_000 },
     );
-    await page.getByRole("link", { name: new RegExp(SCRIPTS.inventory.fileName) }).first().click();
+    await page
+      .getByRole("link", { name: new RegExp(SCRIPTS.inventory.fileName) })
+      .first()
+      .click();
     await expect(page).toHaveURL(new RegExp(`/runs/${runId}$`));
 
     // FA-07.2: the whole history is there, and it comes from the durable copy —
