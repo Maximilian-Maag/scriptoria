@@ -1,5 +1,6 @@
 import type { Schedule, UpdateScheduleRequest } from "@scriptoria/contracts";
 import {
+  commandRunsScript,
   managedJobs,
   nextRunAt,
   parseCrontab,
@@ -91,7 +92,9 @@ export async function listSchedules(
       const occurrence = seen.get(line.command) ?? 0;
       seen.set(line.command, occurrence + 1);
 
-      const script = scripts.find((candidate) => line.command.includes(candidate.absolutePath));
+      const script = scripts.find((candidate) =>
+        commandRunsScript(line.command, candidate.absolutePath),
+      );
       const validation = validateCronExpression(line.expression);
 
       schedules.push({

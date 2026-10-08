@@ -31,6 +31,7 @@ export {
   DEFAULT_CRON_TIMEZONE,
   type CronValidation,
 } from "./cron";
+export { commandRunsScript } from "./scriptReference";
 export {
   encodeTerminalFrame,
   decodeTerminalFrame,
