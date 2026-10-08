@@ -98,6 +98,23 @@ function answering(answer: Run, transcript = "UmVhZGluZyBpbnRlcmZhY2Vz"): string
       if (path === `/runs/${RUN_ID}`) return json(answer);
       if (path === `/runs/${RUN_ID}/transcript`)
         return json({ contentBase64: transcript, truncated: false });
+      // The console also renders the result panel, which asks for the run's
+      // files. Answered properly rather than left to 404: the panel reports a
+      // failed read as a failure (#57), so a 404 here puts "Could not read the
+      // results" on the page — which the assertion below forbids, at whichever
+      // moment the error happens to land relative to it. That made this test a
+      // race (it lost it in CI once). A run that wrote nothing is the honest
+      // answer for a console test that is about the terminal, and it is what
+      // FA-07.5 says an empty run looks like.
+      if (path === `/runs/${RUN_ID}/results`)
+        return json({
+          runId: RUN_ID,
+          directory: "/opt/scriptoria/export",
+          files: [],
+          totalBytes: 0,
+          partial: false,
+          collectedAt: "2026-09-24T09:00:09.000Z",
+        });
       return new Response("", { status: 404 });
     }),
   );

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { ResultList, Run } from "@scriptoria/contracts";
+import { archiveFileName } from "@scriptoria/core";
 import { ApiFailure, api } from "@/lib/api";
 import { ResultPreviewDialog } from "./ResultPreviewDialog";
 
@@ -260,11 +261,22 @@ export function resultsRefetchInterval(list: ResultList | undefined): number | f
   return list?.partial === false ? false : 5_000;
 }
 
-/** Matches what the control plane names the archive, so the two agree. */
-function archiveName(run: Run): string {
-  const base = run.scriptFileName.replace(/\.[^.]+$/, "") || "results";
-  const stamp = new Date(run.queuedAt).toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  return `${base}-${stamp}.zip`;
+/**
+ * The name the browser saves the ZIP under.
+ *
+ * `archiveFileName` in `@scriptoria/core` is the one rule for this, and it is
+ * shared with the control plane, which names the same archive in its
+ * `Content-Disposition`. It sanitises the script's name the way a response
+ * header and a ZIP entry both require — a newline or anything outside Latin-1
+ * is legal in a file name on the script VM and invalid in a header.
+ *
+ * This was a second copy of the rule, and it skipped the sanitiser, so the two
+ * could disagree: for a script called `réport.sh` the interface saved
+ * `réport-….zip` while the header named `r-port-….zip`. Delegating to the shared
+ * function is what keeps them from drifting apart again.
+ */
+export function archiveName(run: Run): string {
+  return archiveFileName(run.scriptFileName, new Date(run.queuedAt));
 }
 
 function size(bytes: number): string {
