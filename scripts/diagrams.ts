@@ -175,7 +175,7 @@ function exportToPlantuml(): void {
  * from landing on top of them.
  *
  * They are applied here rather than in workspace.dsl because the DSL's
- * `autoLayout` figures serve a second renderer: Structurizr Lite, at :8088,
+ * `autoLayout` figures serve a second renderer: Structurizr Lite, at :8089,
  * lays the model out with them directly, while the PlantUML export divides
  * rankSeparation by 5 and nodeSeparation by 10 before writing its skinparams.
  * One pair of numbers cannot be right for both — the values that make the

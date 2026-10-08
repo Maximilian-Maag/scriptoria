@@ -11,7 +11,7 @@ import { defineConfig, intFromEnv } from "./load";
  * `loadBackendConfig()` would be a package that cannot be imported by the runner.
  */
 export const databaseSchema = z.object({
-  DATABASE_URL: z.string().url().default("postgres://postgres:postgres@localhost:5432/scriptoria"),
+  DATABASE_URL: z.string().url().default("postgres://postgres:postgres@localhost:5433/scriptoria"),
   DATABASE_POOL_MAX: intFromEnv({ min: 1 }).default(10),
 });
 
