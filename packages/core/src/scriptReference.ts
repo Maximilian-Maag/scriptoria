@@ -7,24 +7,28 @@
  * interface offers a *Run now* button on, so getting it wrong starts a script
  * nobody asked for.
  *
- * The reference has to match on a **path boundary**, not as a bare substring. A
- * directory holding `deploy.sh` beside `deploy.sh.in` — a `.in`, `.bak`, `.old`
- * or `.template` sibling, which is an ordinary thing to keep next to a script —
- * would otherwise attribute the line that runs `deploy.sh.in` to `deploy.sh`: a
- * substring match finds the shorter name first because the catalog is ordered by
- * file name and `deploy.sh` sorts before `deploy.sh.in`. *Run now* then starts
- * `deploy.sh`, and for a pair like that the two are rarely the same script.
+ * The reference has to match on a **shell word boundary**, not as a bare
+ * substring. A directory holding `deploy.sh` beside `deploy.sh.in` — a `.in`,
+ * `.bak`, `.old` or `.template` sibling, which is an ordinary thing to keep next
+ * to a script — would otherwise attribute the line that runs `deploy.sh.in` to
+ * `deploy.sh`: a substring match finds the shorter name first because the
+ * catalog is ordered by file name and `deploy.sh` sorts before `deploy.sh.in`.
+ * *Run now* then starts `deploy.sh`, and for a pair like that the two are rarely
+ * the same script.
  *
- * A shell word is delimited by whitespace, quotes, redirections and the other
- * punctuation a command line is built from, so the characters that may sit
- * immediately before and after the path are the ones that are *not* part of a
- * path. `/` is deliberately not one of them: the paths here are absolute and
- * begin with `/`, so a `/` on the left of a match means the match started in the
- * middle of some longer path, and rejecting it is right.
+ * The boundary is tested by naming what *ends* a shell word — whitespace, a
+ * quote, a backtick, the shell's operators — and not by naming what a path may
+ * contain. A file name is allowed to contain nearly anything (`+`, `%`, `=`), so
+ * a list of path characters is a list that will one day be missing one; that is
+ * how `deploy.sh+backup` was read as `deploy.sh`. A character that is not a
+ * separator continues the same word, and so cannot bound a path.
  */
 
-/** A character that can appear inside a path, and so cannot bound one. */
-const PATH_CHARACTER = /[A-Za-z0-9._-]/;
+/** Characters that end a shell word: whitespace and the shell's own grammar. */
+const WORD_SEPARATOR = /[\s;&|()<>'"`]/;
+
+/** Whether the given position ends the word — an empty neighbour is an end. */
+const endsWord = (character: string): boolean => character === "" || WORD_SEPARATOR.test(character);
 
 /**
  * Whether the shell command line `command` runs the script at `absolutePath`.
@@ -43,7 +47,7 @@ export function commandRunsScript(command: string, absolutePath: string): boolea
 
     const before = at === 0 ? "" : (command[at - 1] ?? "");
     const after = command[at + absolutePath.length] ?? "";
-    if (!PATH_CHARACTER.test(before) && !PATH_CHARACTER.test(after)) return true;
+    if (endsWord(before) && endsWord(after)) return true;
 
     // Keep looking: this occurrence is inside a longer word, a later one may not
     // be. Starting past the match's first character is enough to make progress.

@@ -32,6 +32,11 @@ describe("commandRunsScript", () => {
     expect(commandRunsScript("/opt/scriptoria/scripts/deploy.sh.in", SCRIPT)).toBe(false);
     expect(commandRunsScript("/opt/scriptoria/scripts/deploy.sh.bak", SCRIPT)).toBe(false);
     expect(commandRunsScript("/opt/scriptoria/scripts/deploy.sh.old --now", SCRIPT)).toBe(false);
+    // And siblings whose suffix is not one of the characters the rule used to
+    // call "not part of a path": a file name may contain `+` or `%`, so the
+    // boundary cannot be decided by a list of path characters.
+    expect(commandRunsScript("/opt/scriptoria/scripts/deploy.sh+backup", SCRIPT)).toBe(false);
+    expect(commandRunsScript("/opt/scriptoria/scripts/deploy.sh%2024", SCRIPT)).toBe(false);
   });
 
   it("does not match a shorter path it begins with", () => {
