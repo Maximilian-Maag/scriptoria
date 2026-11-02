@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { Run } from "@scriptoria/contracts";
-import { collectionSettled } from "@scriptoria/core";
+import type { ResultList, Run } from "@scriptoria/contracts";
+import { archiveFileName, collectionSettled } from "@scriptoria/core";
 import { ApiFailure, api } from "@/lib/api";
 import { ResultPreviewDialog } from "./ResultPreviewDialog";
 
@@ -24,6 +24,11 @@ import { ResultPreviewDialog } from "./ResultPreviewDialog";
  * the exit code ends the run, it does not decide whether what the run produced
  * is worth seeing. A partial result is evidence about what the run managed to
  * do before it stopped.
+ *
+ * FA-09.5 also decides what the panel may *not* say. "This run wrote nothing"
+ * is a claim about the run, and it is only available once the output directory
+ * has actually been read — so a failed results call is reported as a failed
+ * call, not as an empty run (issue #57).
  */
 export function ResultPanel({ run }: { run: Run }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -33,23 +38,7 @@ export function ResultPanel({ run }: { run: Run }) {
   const results = useQuery({
     queryKey: ["results", run.id],
     queryFn: () => api.results(run.id),
-    /**
-     * Polled until the collection has actually reported — *not* until the run
-     * finishes. The collector lists the output directory after the process
-     * exits, so stopping at `finishedAt` stopped one beat too early and left
-     * this panel saying "No result files" beside a status line that said there
-     * were four. `collectionSettled` is that rule, and it is tested.
-     */
-    refetchInterval: (query) => {
-      // Two conditions, and the second one is not redundant: the run record and
-      // this list are polled independently, so the count can land here first and
-      // switch the polling off while this query still holds the empty list it
-      // fetched a moment earlier. Asking until the two agree is what closes it.
-      const held = query.state.data?.files.length ?? 0;
-      const collected = run.resultCount;
-      if (collectionSettled(run) && (collected === null || held >= collected)) return false;
-      return 3_000;
-    },
+    refetchInterval: (query) => resultsRefetchInterval(query.state.data, run),
   });
 
   const list = results.data;
@@ -102,6 +91,21 @@ export function ResultPanel({ run }: { run: Run }) {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* A read that failed is said as a failure (#57), and what is already on
+            screen stays on screen: a *refetch* that fails leaves the last
+            successful response in `results.data`, so these files can be real
+            while the read that just failed is real too. Taking them away would
+            hide output FA-09.5 keeps visible; the empty state is a claim about
+            the run and stays for a read that succeeded and came back empty. */}
+        {results.isError ? (
+          <ErrorState
+            detail={
+              results.error instanceof ApiFailure
+                ? results.error.message
+                : "The control plane did not answer."
+            }
+          />
+        ) : null}
         {files.length > 0 ? (
           <ul className="divide-y divide-line">
             {files.map((file) => (
@@ -149,7 +153,7 @@ export function ResultPanel({ run }: { run: Run }) {
               </li>
             ))}
           </ul>
-        ) : (
+        ) : results.isError ? null : (
           <EmptyState finished={run.finishedAt !== null} />
         )}
       </div>
@@ -200,6 +204,26 @@ export function ResultPanel({ run }: { run: Run }) {
   );
 }
 
+/**
+ * A read that failed, said as a failure (issue #57).
+ *
+ * `EmptyState` below is a claim about the run — that the output directory was
+ * listed and it was empty — and FA-09.5 is the requirement that keeps results
+ * visible for a failed run. A failed call is not evidence for that claim:
+ * rendering it as "This run wrote nothing into its output directory" reports an
+ * outage as a negative result, and the operator concludes the script produced
+ * nothing when in fact nobody managed to ask. The area page and the run history
+ * answer a failed read the same way.
+ */
+function ErrorState({ detail }: { detail: string }) {
+  return (
+    <div className="px-5 py-4">
+      <p className="text-[13px] text-ink">Could not read the results</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">{detail}</p>
+    </div>
+  );
+}
+
 function EmptyState({ finished }: { finished: boolean }) {
   return (
     <div className="px-5 py-4">
@@ -213,11 +237,49 @@ function EmptyState({ finished }: { finished: boolean }) {
   );
 }
 
-/** Matches what the control plane names the archive, so the two agree. */
-function archiveName(run: Run): string {
-  const base = run.scriptFileName.replace(/\.[^.]+$/, "") || "results";
-  const stamp = new Date(run.queuedAt).toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  return `${base}-${stamp}.zip`;
+/**
+ * When the results list is asked for again (FA-09.1, FA-09.5).
+ *
+ * `partial` is the control plane's own answer — the collector is still working —
+ * and on its own it is not enough. The runner writes the run's terminal status
+ * *before* it lists the output directory, so for a moment a finished run answers
+ * with an empty list that is not `partial`; an interval that stopped on that
+ * answer showed "No result files" for ever beside a status line that said four.
+ * `collectionSettled` is the rule for that moment — the run is over *and* the
+ * collection has had its chance — and it is shared with the console's own poll,
+ * so the two views cannot disagree about when a run is done producing.
+ *
+ * The count closes the last gap. The run record and this list are polled
+ * independently, so `resultCount` can land here first and switch the polling off
+ * while this query still holds the empty list it fetched a moment earlier.
+ * Asking until the two agree is what ends it.
+ */
+export function resultsRefetchInterval(list: ResultList | undefined, run: Run): number | false {
+  if (!list || list.partial) return 5_000;
+  if (!collectionSettled(run)) return 5_000;
+
+  const collected = run.resultCount;
+  if (collected !== null && list.files.length < collected) return 5_000;
+
+  return false;
+}
+
+/**
+ * The name the browser saves the ZIP under.
+ *
+ * `archiveFileName` in `@scriptoria/core` is the one rule for this, and it is
+ * shared with the control plane, which names the same archive in its
+ * `Content-Disposition`. It sanitises the script's name the way a response
+ * header and a ZIP entry both require — a newline or anything outside Latin-1
+ * is legal in a file name on the script VM and invalid in a header.
+ *
+ * This was a second copy of the rule, and it skipped the sanitiser, so the two
+ * could disagree: for a script called `réport.sh` the interface saved
+ * `réport-….zip` while the header named `r-port-….zip`. Delegating to the shared
+ * function is what keeps them from drifting apart again.
+ */
+export function archiveName(run: Run): string {
+  return archiveFileName(run.scriptFileName, new Date(run.queuedAt));
 }
 
 function size(bytes: number): string {

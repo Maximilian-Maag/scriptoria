@@ -245,7 +245,10 @@ export default function AdminAuditPage() {
         ) : null}
 
         {entries.data && entries.data.items.length > 0 ? (
-          <ul className="divide-y divide-line overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface">
+          <ul
+            aria-label="Audit entries"
+            className="divide-y divide-line overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface"
+          >
             {entries.data.items.map((entry) => (
               <EntryRow key={entry.id} entry={entry} areaName={areaName(entry.areaId)} />
             ))}

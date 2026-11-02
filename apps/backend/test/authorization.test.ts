@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import "./support/setup";
 import { listAreas } from "@/lib/services/areaService";
 import { getRun, listRuns } from "@/lib/services/runService";
 import { queryAuditLog } from "@/lib/services/auditService";

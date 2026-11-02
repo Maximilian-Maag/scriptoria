@@ -3,19 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "Playwright end-to-end suite — the real interface against the real stack (Makefile: make test-e2e)",
   "scripts": {
     "test": "playwright test",
     "test:headed": "playwright test --headed",
-    "test:ui": "playwright test --ui",
     "report": "playwright show-report",
-    "build": "tsc --noEmit",
-    "lint": "eslint .",
-    "install-browsers": "playwright install --with-deps chromium"
+    "browsers": "playwright install chromium"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.1",
-    "@scriptoria/config": "workspace:*",
-    "@scriptoria/contracts": "workspace:*",
-    "typescript": "^5.7.3"
+    "@playwright/test": "^1.63.0",
+    "postgres": "^3.4.5"
   }
 }

@@ -31,6 +31,7 @@ export {
   DEFAULT_CRON_TIMEZONE,
   type CronValidation,
 } from "./cron";
+export { commandRunsScript } from "./scriptReference";
 export {
   encodeTerminalFrame,
   decodeTerminalFrame,
@@ -42,6 +43,8 @@ export {
   contentTypeFor,
   isPreviewable,
   archiveFileName,
+  sanitiseFileName,
+  sanitiseArchiveEntry,
   DEFAULT_CONTENT_TYPE,
   MAX_PREVIEW_BYTES,
 } from "./resultFiles";

@@ -7,7 +7,7 @@ import type {
   SshTarget,
 } from "@scriptoria/contracts";
 import { isTerminalStatus } from "@scriptoria/contracts";
-import { canAccessArea } from "@scriptoria/core";
+import { archiveFileName, canAccessArea, sanitiseArchiveEntry } from "@scriptoria/core";
 import {
   areaRepository,
   auditRepository as audit,
@@ -271,7 +271,12 @@ export async function archiveResults(
           return;
         }
         archive.append(Readable.fromWeb(file.value.body as StreamWebReadable), {
-          name: record.path,
+          // A ZIP entry name is the path inside the archive, and it is shown by
+          // every extractor as a file on disk. Sanitised segment-wise for the
+          // same reason the download header is: the path is whatever SFTP
+          // reported, a newline is legal in a file name there, and the entry
+          // name should match what the file is called when downloaded.
+          name: sanitiseArchiveEntry(record.path),
           date: new Date(record.modifiedAt),
         });
         // One file in flight at a time. Without this the loop would issue every
@@ -301,14 +306,7 @@ export async function archiveResults(
 
   return ok({
     body: Readable.toWeb(archive) as ReadableStream<Uint8Array>,
-    name: archiveName(run.scriptFileName, run.queuedAt),
+    name: archiveFileName(run.scriptFileName, run.queuedAt),
     fileCount: wanted.length,
   });
-}
-
-/** Readable enough to find again in a downloads folder holding forty of these. */
-function archiveName(scriptFileName: string, queuedAt: Date): string {
-  const base = scriptFileName.replace(/\.[^.]+$/, "") || "results";
-  const stamp = queuedAt.toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  return `${base}-${stamp}.zip`;
 }

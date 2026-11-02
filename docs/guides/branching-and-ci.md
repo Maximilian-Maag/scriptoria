@@ -51,6 +51,7 @@ protections are what make that safe — not the workflow file.
 | **Type-check & Lint** | `make type-check`, `make lint` | Both halves share an install and take seconds. Splitting them would double the setup cost to parallelise ninety seconds. |
 | **Test** | One leg per package: `@scriptoria/*`, runner, frontend — and the backend in its own job, with a Postgres service | A slow suite stops being every suite's problem, and a red frontend does not hide a red runner. The backend is separate because it is the only one needing a service: its authorisation tests run against a real database, since the bug worth catching is a `where` clause that stopped filtering. |
 | **Build** | `make build` | Catches what type-checking cannot: both web tiers are Next.js applications whose routes are collected and compiled at build time. |
+| **Schema & migrations** | `make db-migrate`, `make db-check`, `make db-seed` against a Postgres service container | `schema.ts` and `drizzle/*.sql` are two descriptions of one database and nothing else compares them. They drifted once: a database built by `make db-migrate` had the directory-group columns under their old names, so it could be neither seeded nor logged into, and only a login attempt found out (#24). |
 | **Architecture model** | `make diagrams-png`, only when the model changed | `workspace.dsl` is the source of truth and its renders are gitignored, so nothing else would notice a model that stopped parsing. |
 | **End-to-end** | `make dev`, then `make test-e2e` | The only check that exercises the product as a person meets it — a browser, a real LDAP bind, a real PTY, real files back over SFTP. Everything above it can be green while the platform does nothing. |
 
@@ -92,6 +93,7 @@ Set on `dev`, `staging` and `main`, requiring these checks by exact name:
 - `Type-check & Lint`
 - `Test`
 - `Build`
+- `Schema & migrations`
 
 Plus: a pull request before merging, and branches up to date before merge.
 
@@ -105,6 +107,12 @@ the slowest check by a wide margin and the one most able to fail for reasons
 that are not the pull request's. It is worth requiring once it has a few weeks
 of history to argue from — and worth reading on every pull request meanwhile,
 because it is the only check that can tell whether the product works.
+
+The one thing to know before enabling a new required check: the workflow file
+that reports it has to be on the branch the pull request is opened *from*. All
+three branches carry `ci.yml` after the first promotion, but a branch cut from a
+release branch before that promotion has no checks to report, and a required
+check that is never reported blocks the pull request rather than failing it.
 
 ## What is not here yet
 

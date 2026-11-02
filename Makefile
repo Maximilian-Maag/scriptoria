@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-down dev-logs run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
+.PHONY: help install dev dev-down dev-logs run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
 
 # pnpm is installed via the standalone script — add its bin dir to PATH so make can find it
 PNPM_HOME ?= $(HOME)/.local/share/pnpm
@@ -26,9 +26,12 @@ help:
 	@echo "  lint                  lint all apps and packages"
 	@echo "  type-check            TypeScript type-check everything"
 	@echo "  test                  run unit and integration tests (the backend leg needs the dev stack)"
-	@echo "  test-e2e              run the Playwright end-to-end suite (requires a live stack)"
+	@echo "  test-e2e              run the Playwright end-to-end suite (needs a live stack: make dev)"
+	@echo "                        E2E_SPECS=tests/05-stop.spec.ts runs one requirement's specs"
 	@echo "  test-db               create the test and e2e databases in the running Postgres"
 	@echo "  test-db-prune         drop the per-directory test databases"
+	@echo "  db-check              fail if schema.ts and the migrations disagree"
+	@echo "  db-check-test         test the drift check itself (needs a Postgres it can create a database on)"
 	@echo "  db-generate           generate a Drizzle migration from the schema"
 	@echo "  db-migrate            apply pending migrations (the working path)"
 	@echo "  db-push               push the schema straight to the database — see the note below"
@@ -75,7 +78,7 @@ lint:
 	$(PNPM) lint
 
 type-check:
-	$(PNPM) --parallel --filter './apps/*' --filter './packages/*' exec tsc --noEmit
+	$(PNPM) --parallel --filter './apps/*' --filter './packages/*' --filter e2e exec tsc --noEmit
 
 test:
 	$(PNPM) --filter backend test
@@ -83,8 +86,33 @@ test:
 	$(PNPM) --filter frontend test
 	$(PNPM) --filter '@scriptoria/*' test
 
-test-e2e:
-	$(PNPM) test:e2e
+# ── End-to-end ────────────────────────────────────────────────────────────────
+# The suite drives the real interface against the real stack. It needs postgres,
+# redis, the directory fixture and the script-VM fixture up — `make dev` — and
+# nothing else: Playwright starts the frontend, the backend and the runner
+# itself, so a stale build already listening on :3000 cannot be what the suite
+# reports on.
+#
+# It runs against its own database rather than the one `make run` uses, so a
+# suite run cannot rewrite the area an operator is looking at, and so the state
+# it asserts on is the state its own migrate-and-seed put there.
+E2E_DATABASE_URL ?= postgres://postgres:postgres@localhost:5433/scriptoria_e2e
+
+# One requirement can be run on its own, by naming any Playwright filter:
+#
+#   make test-e2e E2E_SPECS=tests/05-stop.spec.ts
+#
+# CI gives each requirement its own check with this, so a red end-to-end run
+# names the requirement it broke instead of "the suite is broken" — and so the
+# failure lands next to the requirement's own specs rather than in a five-minute
+# log. Empty means the whole suite, which is what a developer wants.
+E2E_SPECS ?=
+
+test-e2e: test-db
+	@echo "  e2e database: $(E2E_DATABASE_URL)"
+	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) --filter @scriptoria/db db:migrate
+	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) --filter @scriptoria/db db:seed
+	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) test:e2e $(if $(E2E_SPECS),-- $(E2E_SPECS),)
 
 # The backend suite creates its own database on first run — one per working
 # directory, so two runs cannot truncate each other's tables. This target only
@@ -108,6 +136,26 @@ test-db-prune:
 
 db-generate:
 	$(PNPM) --filter @scriptoria/db db:generate
+
+# The database the migrations build, against the database the code believes in.
+# They are two descriptions of one thing and nothing else compares them: the
+# directory-group columns were renamed in the schema with no migration to follow,
+# and a `make db-migrate` database silently could not seed or log in (#24).
+#
+# Needs a migrated database — `make db-migrate` first, which is exactly what the
+# job in CI and the deployment's unit both do.
+db-check:
+	$(PNPM) --filter @scriptoria/db db:check
+
+# The drift check's own regression suite. It builds a throwaway database from
+# the migrations, makes each mutation the check exists to catch — an index that
+# has lost its uniqueness, an index moved to another column, an enum value
+# renamed — and asserts each is reported (#59). It needs a Postgres it can
+# create a database on, which is why CI runs it in the "Schema & migrations"
+# job; it skips itself where there is no DATABASE_URL, so `make test` is
+# unaffected on a machine with no stack up.
+db-check-test:
+	$(PNPM) --filter @scriptoria/db test
 
 db-migrate:
 	$(PNPM) --filter @scriptoria/db db:migrate

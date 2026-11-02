@@ -1,113 +1,111 @@
-import { defineConfig, devices } from "@playwright/test";
-import { loadEnvFile } from "@scriptoria/config";
-
 /**
- * The end-to-end suite — the only tests in this repository that exercise the
- * product as a person meets it: a browser, a real directory bind, a real PTY on
- * the script VM, real files coming back.
+ * The end-to-end suite's own Playwright configuration.
  *
- * It runs its **own** stack, on its own ports and against its own database, and
- * that is deliberate. A suite pointed at `make run` would depend on whatever
- * state the developer's session left behind, and one that wrote into the dev
- * database would destroy it; `make test-db` creates `scriptoria_e2e` for
- * exactly this. What the suite does *not* provide is the infrastructure —
- * Postgres, Redis, the directory and the sshd fixture come from `make dev`,
- * because standing up a second copy of five containers per test run would cost
- * minutes to prove nothing.
+ * Run it through the Makefile — `make test-e2e` — which is the same command CI
+ * runs, so a green run here and a green run there mean the same thing.
+ *
+ * **Prerequisites, all of them already on the host:**
+ *
+ *   make dev            postgres, redis, the directory fixture, the script-VM fixture
+ *   make fixtures-key   the SSH keypair the runner presents to the fixture
+ *   make db-migrate     the schema
+ *   make db-seed        the root group and the reference area
+ *   pnpm --filter e2e browsers    Chromium, once per machine
+ *
+ * The three application processes are started here rather than expected to be
+ * running: a suite that silently tests whatever happens to be listening on
+ * :3000 is a suite that reports success about somebody's stale build. An
+ * already-running stack is reused outside CI, where a developer has `make run`
+ * open in another terminal and would rather not have it killed.
  */
+import { defineConfig, devices } from "@playwright/test";
+import { BASE_URL, BACKEND_ORIGIN } from "./src/env";
 
-loadEnvFile();
-
-const FRONTEND_PORT = 3100;
-const BACKEND_PORT = 3101;
-
-/** The dev database's connection, pointed at the e2e database beside it. */
-const DATABASE_URL =
-  process.env["E2E_DATABASE_URL"] ??
-  (process.env["DATABASE_URL"] ?? "postgres://postgres:postgres@localhost:5432/scriptoria").replace(
-    /\/[^/?]+(\?|$)/,
-    "/scriptoria_e2e$1",
-  );
-
-/**
- * The environment both tiers are started with. `process.env` wins over the
- * repository's `.env` (Node's own `loadEnvFile` does not overwrite what is
- * already set), so these are overrides rather than a second configuration.
- */
-export const stackEnv = {
-  ...process.env,
-  NODE_ENV: "development",
-  DATABASE_URL,
-  BACKEND_PORT: String(BACKEND_PORT),
-  FRONTEND_PORT: String(FRONTEND_PORT),
-  BACKEND_INTERNAL_URL: `http://localhost:${BACKEND_PORT}`,
-  // Read at compile time by the client bundle, so it has to be right before the
-  // frontend starts rather than when a test opens the terminal.
-  NEXT_PUBLIC_TERMINAL_WS_URL: `ws://localhost:${BACKEND_PORT}`,
-  LOG_LEVEL: "warn",
-  // See apps/frontend/next.config.mjs — the dev overlay's portal covers the
-  // sign-out button, and a test cannot click through it.
-  DISABLE_DEV_INDICATORS: "true",
-} as Record<string, string>;
+const CI = Boolean(process.env.CI);
 
 export default defineConfig({
   testDir: "./tests",
-  globalSetup: "./support/global-setup.ts",
-  globalTeardown: "./support/global-teardown.ts",
+  globalSetup: "./src/global-setup.ts",
 
   /**
-   * Serial, and one worker. These tests share one script VM, one run queue and
-   * one database: two of them starting scripts at once would be testing the
-   * scheduler rather than the product, and the flake would be real but
-   * uninteresting.
+   * Serial, and deliberately.
+   *
+   * Every spec drives the same estate: one area, one script-VM fixture, one
+   * crontab, one export directory. Two specs in parallel would be editing one
+   * crontab and reading one export directory at the same time, and the failures
+   * that produces are the kind that pass on a rerun — which is worse than slow.
    */
-  fullyParallel: false,
   workers: 1,
+  fullyParallel: false,
 
-  forbidOnly: !!process.env["CI"],
-  retries: process.env["CI"] ? 1 : 0,
-  timeout: 60_000,
+  // A focused `test.only` must never reach a merge.
+  forbidOnly: CI,
+
+  // One retry in CI only: a flake in a distributed CI runner is common enough
+  // to be worth answering, and `trace` below is what makes it answerable.
+  retries: CI ? 1 : 0,
+
+  timeout: 90_000,
   expect: { timeout: 15_000 },
 
-  reporter: process.env["CI"] ? [["github"], ["html", { open: "never" }]] : [["list"]],
+  reporter: CI
+    ? [["github"], ["html", { open: "never" }], ["list"]]
+    : [["list"], ["html", { open: "never" }]],
 
   use: {
-    baseURL: `http://localhost:${FRONTEND_PORT}`,
+    baseURL: BASE_URL,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    video: "off",
+    video: "retain-on-failure",
+    // The interface is German-tolerant by design (ADR-006) but its own wording
+    // is British English, so the browser's locale must not be the variable that
+    // decides what a date or a "last successful" looks like.
+    locale: "en-GB",
+    timezoneId: "Europe/Berlin",
+    // FA-09.4 is "copy the content to transfer it to another system without a
+    // download", and a preview's Copy button is refused without this. Granted
+    // here rather than worked around, so the spec exercises the real clipboard
+    // instead of asserting that the refusal banner appeared.
+    permissions: ["clipboard-read", "clipboard-write"],
   },
 
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-
-  /**
-   * Both web tiers, started in development mode. Production mode would need a
-   * build per run, and the thing under test is the product's behaviour rather
-   * than its bundling — the images prove that (`make docker-build`).
-   *
-   * The runner is not here: Playwright waits for a URL, and the runner listens
-   * on no port. It is started in the global setup instead.
-   */
-  webServer: [
+  projects: [
     {
-      command: "pnpm --filter backend dev",
-      url: `http://localhost:${BACKEND_PORT}/api/health`,
-      cwd: "..",
-      env: stackEnv,
-      reuseExistingServer: !process.env["CI"],
-      timeout: 120_000,
-      stdout: "ignore",
-      stderr: "pipe",
-    },
-    {
-      command: "pnpm --filter frontend dev",
-      url: `http://localhost:${FRONTEND_PORT}/login`,
-      cwd: "..",
-      env: stackEnv,
-      reuseExistingServer: !process.env["CI"],
-      timeout: 120_000,
-      stdout: "ignore",
-      stderr: "pipe",
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
   ],
+
+  webServer: {
+    // All three at once, exactly as `make run` starts them. The runner has no
+    // listening port, so the readiness signal is the frontend's — the runner is
+    // then proven by the first spec that queues work and watches it run.
+    command: "pnpm --parallel --filter frontend --filter backend --filter runner dev",
+    cwd: "..",
+    url: `${BASE_URL}/login`,
+    reuseExistingServer: !CI,
+    timeout: 240_000,
+    /**
+     * The three applications' own output, forwarded rather than dropped.
+     *
+     * Playwright ignores a web server's stdout by default, which is the wrong
+     * default here: these are three processes whose *whole* job is to say what
+     * they are doing, and the failure that costs the most time is the one where
+     * one of them never got going. A runner that fails at startup has no port to
+     * poll and no request to answer, so the only place it ever says so is its own
+     * log — and with this off, a job fails three assertions later with a 502 that
+     * names the wrong component.
+     */
+    stdout: "pipe",
+    env: {
+      // The child processes inherit this suite's environment, which is how an
+      // operator points a run at a deployment: set DATABASE_URL, REDIS_URL,
+      // LDAP_URL and the rest before invoking the suite. The two below are set
+      // explicitly because a Next.js dev server started with NODE_ENV=test
+      // behaves differently from the one the deployment runs.
+      ...process.env,
+      NODE_ENV: "development",
+      BACKEND_PUBLIC_ORIGIN: BACKEND_ORIGIN,
+    },
+  },
 });

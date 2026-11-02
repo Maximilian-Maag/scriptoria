@@ -47,6 +47,15 @@ export async function startRun(
   if (!found) return notFound("No such script");
 
   const { script, source } = found;
+
+  // FA-03.3: a script the newest scan did not find is shown as vanished, and the
+  // entry exists for its history rather than as something to run. Starting it
+  // would open an SSH session to a path that is not there and fail in the
+  // terminal, which reads as a broken script VM rather than as a stale list.
+  if (!scriptRepository.isPresent(script)) {
+    return conflict("This script is no longer on the script VM. Rescan the catalog.");
+  }
+
   const criticality = effectiveCriticality(script.criticalityOverride, script.header);
 
   const run = await runRepository.createRun({
@@ -189,6 +198,45 @@ export async function abortRun(
           `${found.scriptFileName} modifies target systems. Confirm by naming the script to stop it.`,
         )
       : err("validation_failed", "The confirmation does not name this script");
+  }
+
+  // FA-08.1 / ADR-003 — a run that has not started is not a run to signal, it is
+  // a run to cancel.
+  //
+  // A `queued` run has no worker holding it and no PTY to signal: nothing is
+  // subscribed to its control channel, so a published stop reaches nobody, and
+  // `recordAbortRequest` was read by nobody (#50). The worker's claim is what
+  // decides the race — if this transition lands, the run never starts, because
+  // the claim is guarded on `queued` and a worker that loses that guard stands
+  // down. If it does not land, the worker got there first and the request has to
+  // reach it the other way, below.
+  if (found.status === "queued") {
+    const cancelled = await runRepository.transition(
+      runId,
+      "aborted",
+      { finishedAt: new Date(), failureReason: "aborted_by_user" },
+      ["queued"],
+    );
+
+    if (cancelled) {
+      await runRepository.appendEvent(
+        runId,
+        "abort_requested",
+        `Requested by ${session.username} before the run started`,
+      );
+
+      await audit.record({
+        actor: session.username,
+        action: "run_aborted",
+        subject: found.scriptFileName,
+        areaId: found.areaId,
+        runId,
+        detail: { criticality: found.criticality, status: "queued" },
+        sourceIp: context.sourceIp ?? null,
+      });
+
+      return ok(null);
+    }
   }
 
   await runRepository.recordAbortRequest(runId, session.username);

@@ -17,10 +17,20 @@ import { remotePathSchema } from "./common";
 export const criticalitySchema = z.enum(["read-only", "modifying", "unknown"]);
 export type Criticality = z.infer<typeof criticalitySchema>;
 
+/**
+ * The caps the contract and the parser share.
+ *
+ * They are exported because the parser has to respect them: a header longer than
+ * its own contract allows is a header the catalog drops entirely, and the one
+ * value that must survive a long title is the criticality next to it.
+ */
+export const SCRIPT_TITLE_MAX_LENGTH = 200;
+export const SCRIPT_DESCRIPTION_MAX_LENGTH = 4_000;
+
 /** What the header block declared, exactly as parsed. Every key is optional. */
 export const scriptHeaderSchema = z.object({
-  title: z.string().trim().max(200).optional(),
-  description: z.string().trim().max(4000).optional(),
+  title: z.string().trim().max(SCRIPT_TITLE_MAX_LENGTH).optional(),
+  description: z.string().trim().max(SCRIPT_DESCRIPTION_MAX_LENGTH).optional(),
   criticality: criticalitySchema.optional(),
   interactive: z.boolean().optional(),
   /** Where this script says its results land, if it says so. */
@@ -69,6 +79,17 @@ export const scriptSchema = z.object({
   modifiedAt: z.string().datetime({ offset: true }).nullable(),
   /** When the scanner last read this file's header. */
   scannedAt: z.string().datetime({ offset: true }),
+
+  /**
+   * FA-03.3: whether the newest scan of this script's source still found it.
+   *
+   * A script that has gone from the script VM is kept rather than deleted — its
+   * run history references it, and FA-12 wants that history readable — so the
+   * catalog has to be able to say which of its entries are still there. `false`
+   * means the file is gone: the entry stays visible as vanished, and a run cannot
+   * be started from it.
+   */
+  present: z.boolean(),
 });
 export type Script = z.infer<typeof scriptSchema>;
 

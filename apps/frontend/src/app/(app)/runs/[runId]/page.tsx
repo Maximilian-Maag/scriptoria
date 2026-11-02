@@ -28,6 +28,14 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
   const run = useQuery({
     queryKey: ["run", runId],
     queryFn: () => api.run(runId),
+    /**
+     * The console's own record decides which source feeds the terminal (below),
+     * so opening the console fetches it. The interface's ten-second cache is
+     * longer than a run takes to finish, so a record served from it can say
+     * `running` about a run that ended before the page opened — and that is
+     * what FA-07.2's read-back depends on not happening (issue #83).
+     */
+    refetchOnMount: "always",
     refetchInterval: (query) => {
       const current = query.state.data;
       // Polled while it is live, and for as long after as the collector might
@@ -39,8 +47,6 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
     },
   });
 
-  const live = run.data ? isLive(run.data.status) : false;
-
   /**
    * Whether this run was already over when the page opened.
    *
@@ -48,11 +54,28 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
    * must never both be used: a run watched from its start has every byte from
    * the socket already, and writing the transcript in afterwards would print
    * the whole run a second time under itself.
+   *
+   * It is decided once, and from a record fetched *for this page* — never from
+   * one the cache was already holding. That record is the one written by the
+   * visit that watched this run start, and it says `running`: deciding from it
+   * means attaching to the live stream of a run that is over, which puts the
+   * capped stream that expires where the durable copy that does not belongs.
+   * `isFetchedAfterMount` is the difference, and it stays false until the fetch
+   * above lands. A refresh that failed falls back to the record we do have
+   * rather than leaving the console with no source at all.
    */
   const openedFinished = useRef<boolean | null>(null);
-  if (openedFinished.current === null && run.data) {
+  if (openedFinished.current === null && run.data && (run.isFetchedAfterMount || run.isError)) {
     openedFinished.current = !isLive(run.data.status);
   }
+
+  /**
+   * The socket is the source for a run this page is watching live — and only
+   * once the record says that is what it is. Until the decision is made neither
+   * source is used, so a run that turns out to be over never attaches to a
+   * stream at all.
+   */
+  const live = openedFinished.current === false && run.data ? isLive(run.data.status) : false;
 
   // FA-07.2 — a run that is already over is read back from the durable copy of
   // its terminal. The live stream is capped and expires; this does not.

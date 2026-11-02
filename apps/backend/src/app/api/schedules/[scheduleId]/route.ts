@@ -1,6 +1,6 @@
-import { updateScheduleRequestSchema } from "@scriptoria/contracts";
+import { scheduleIdSchema, updateScheduleRequestSchema } from "@scriptoria/contracts";
 import { updateSchedule } from "@/lib/services/scheduleService";
-import { clientIp, parseBody, requireRoot } from "@/lib/http";
+import { clientIp, parseBody, parsePath, requireRoot } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +28,11 @@ export async function PATCH(
   if (!body.ok) return toResponse(body);
 
   const { scheduleId } = await params;
+  // Eight hex characters, not a UUID: the id is derived from the crontab line
+  // rather than stored (ADR-005, `scheduleIdSchema`), and validating it as a
+  // UUID refused every save this route exists to answer (#73).
+  const path = parsePath({ scheduleId }, { scheduleId: scheduleIdSchema });
+  if (!path.ok) return toResponse(path);
   return toResponse(
     await updateSchedule(session.value, scheduleId, body.value, { sourceIp: clientIp(request) }),
   );

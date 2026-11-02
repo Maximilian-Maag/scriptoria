@@ -8,8 +8,8 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests",
+    "lint": "eslint src test",
+    "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {

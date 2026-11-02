@@ -50,10 +50,14 @@ jobs:
   # — the authorisation rules, the crontab parser and the frame codec are all
   # written to be testable without a directory or a database anywhere near them
   # — and the runner's suite covers its host-key and transcript handling in the
-  # same way. The frontend leg still runs with `--passWithNoTests`, and is here
-  # to fail the day somebody adds a test that needs one.
+  # same way. `packages/db`'s one suite is the drift check's regression test,
+  # which builds its own database and therefore skips here; the "Schema &
+  # migrations" job below is where it runs for real. The frontend leg still runs
+  # with `--passWithNoTests`, and is here to fail the day somebody adds a test
+  # that needs one.
   #
-  # The backend's suite does need a database, and has its own job below.
+  # The backend's suite does need a database — the authorisation tests are the
+  # reason — and has its own job below.
   test-matrix:
     name: Test (${{ matrix.package }})
     runs-on: ubuntu-latest
@@ -163,21 +167,43 @@ jobs:
       - name: Build
         run: make build
 
-  # ── End to end ───────────────────────────────────────────────────────────────
+  # ── Database ─────────────────────────────────────────────────────────────────
   #
-  # The only job that exercises the product as a person meets it: a browser, a
-  # real LDAP bind, a real PTY on the script VM fixture, real files coming back
-  # over SFTP. Everything above this can be green while the platform does
-  # nothing at all.
+  # `packages/db` has no unit tests worth the name — its repositories need a
+  # database — so this is the one place on a pull request where the schema is
+  # checked against a real Postgres.
   #
-  # It is also the only job that needs the stack, which is why it is last and
-  # why it is one job rather than a matrix: the suite runs serially on purpose
-  # (one script VM, one run queue) and splitting it would mean standing up five
-  # containers twice to save nothing.
-  e2e:
-    name: End-to-end
+  #   · `make db-check` asks the *migrated database* whether it has the shape
+  #     `schema.ts` declares. They are two descriptions of one thing and nothing
+  #     else compares them; they drifted once, and a database built by
+  #     `make db-migrate` could then be neither seeded nor logged into, because
+  #     the login path reads the tables that had been renamed (#24).
+  #   · `make db-check-test` is the check's own regression test: it makes the
+  #     mutations the check exists to catch and asserts each is reported, so a
+  #     check that has been weakened fails here rather than in production (#59).
+  #   · migrating and seeding an empty database is the deployment's first step
+  #     and the dev stack's second, and both have failed here before.
+  #
+  # The credentials are literals because this container is reachable from
+  # nowhere: it lives for the length of one job.
+  schema:
+    name: Schema & migrations
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: scriptoria_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/scriptoria_ci
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -185,52 +211,21 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      # The tracked template, which is already pointed at the compose stack.
-      # Everything the suite needs to differ — its ports and its own database —
-      # it passes as overrides, because `process.env` wins over this file.
-      - name: Configure
-        run: cp .env.example .env
+      - name: Apply the migrations to an empty database
+        run: make db-migrate
 
-      # The fixture accepts this key and nothing else does: it is generated per
-      # run and never leaves the runner.
-      - name: Generate the fixture SSH key
-        run: make fixtures-key
+      - name: The migrated database has the shape schema.ts declares
+        run: make db-check
 
-      - name: Start the stack
-        run: make dev
+      # The check's own regression test: it makes the mutations the check exists
+      # to catch and asserts each is reported. A weakened check fails here.
+      - name: The drift check catches the drift it exists for
+        run: make db-check-test
 
-      - name: Create the e2e database
-        run: make test-db
-
-      # Cached by version, because the browser is 130 MB and does not change
-      # between runs of the same Playwright.
-      - name: Cache the browser
-        id: browser-cache
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('**/pnpm-lock.yaml') }}
-
-      - name: Install the browser
-        if: steps.browser-cache.outputs.cache-hit != 'true'
-        run: pnpm --filter e2e exec playwright install --with-deps chromium
-
-      - name: Run the suite
-        run: make test-e2e
-
-      # A failed run is worth more than its exit code: the report carries the
-      # trace, the screenshot and the DOM at the moment it went wrong.
-      - name: Publish the report
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: playwright-report
-          path: e2e/playwright-report
-          retention-days: 7
-
-      - name: Stop the stack
-        if: always()
-        run: make dev-down
+      # The bootstrap the README tells a new checkout to run, and the step that
+      # fails first when a column has been renamed.
+      - name: Seed the root group and the reference area
+        run: make db-seed
 
   # ── Architecture model ───────────────────────────────────────────────────────
   #

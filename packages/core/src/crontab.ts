@@ -163,16 +163,25 @@ export function writeManagedBlock(text: string, entries: readonly ManagedEntry[]
 
   const body = entries.map(renderManagedEntry);
 
-  if (begin === -1 || end === -1 || end < begin) {
-    // No block, or a mangled one. Append a fresh block; never try to repair a
-    // half-present one in place, because guessing where it was supposed to end
-    // is exactly how foreign lines get eaten.
+  if (begin === -1) {
+    // No block yet. Append one; every existing line survives, which is checked
+    // by a test rather than hoped for.
     const trailingBlank = lines.at(-1) === "";
     const head = trailingBlank ? lines.slice(0, -1) : lines;
     return [...head, "", MANAGED_BEGIN, ...body, MANAGED_END, ""].join("\n");
   }
 
-  return [...lines.slice(0, begin + 1), ...body, ...lines.slice(end)].join("\n");
+  // An opening delimiter with no closing one after it is a block the platform
+  // started and did not finish — an interrupted write, or a hand-edit. Repair
+  // it in place rather than appending a second one: `parseCrontab` reads
+  // everything from here to the end of the file as managed, so those lines are
+  // ours to replace, and appending would leave them where they are *and* write
+  // the same jobs again below — a crontab that runs a job twice, which is the
+  // mirror image of the failure ADR-005 exists to prevent.
+  const closing = end > begin ? end : lines.length;
+  const tail = closing === lines.length ? [MANAGED_END, ""] : lines.slice(closing);
+
+  return [...lines.slice(0, begin + 1), ...body, ...tail].join("\n");
 }
 
 /** The jobs inside the managed block, in file order. */

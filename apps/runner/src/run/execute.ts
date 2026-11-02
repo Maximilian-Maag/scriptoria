@@ -1,5 +1,11 @@
-import type { AbortStage, RunFailureReason } from "@scriptoria/contracts";
-import { resultRepository, runRepository, schema, scriptRepository } from "@scriptoria/db";
+import type { AbortStage, RunFailureReason, RunStatus } from "@scriptoria/contracts";
+import {
+  auditRepository as audit,
+  resultRepository,
+  runRepository,
+  schema,
+  scriptRepository,
+} from "@scriptoria/db";
 import { connectTo } from "../driver/sshTarget";
 import type { DirectoryEntry, ExecutionTarget } from "../driver/executionTarget";
 import { StreamPublisher } from "../stream/publisher";
@@ -7,16 +13,6 @@ import { ControlSubscriber } from "../stream/control";
 import { StagedAbort } from "./abort";
 import { Transcript } from "./transcript";
 import { describeError, log } from "../log";
-
-/**
- * One run, from a claimed job to a terminal state.
- *
- * The order of what happens here is the product's promise, in sequence:
- * connect, open a terminal, stream every byte both ways, stop when asked, and
- * then — whatever the exit code was — record what the script left behind.
- * FA-09.5 is explicit that a failed run still has results, because a partial
- * result is evidence about what the run managed to do.
- */
 
 /** How often the claim is renewed while the script is running. */
 const CLAIM_RENEWAL_MS = 20_000;
@@ -27,7 +23,41 @@ export interface RunContext {
   renewClaim: () => Promise<void>;
 }
 
+/**
+ * The last line of defence, and the reason it is here rather than in the job
+ * consumer: once a job has been claimed, a run that nobody carries to a
+ * terminal state is a run nothing will ever pick up again. The job has already
+ * been consumed from the queue, the claim is released as the worker unwinds,
+ * and the reaper only looks at runs somebody opens — where a database blip
+ * would be called `worker_lost`, which is a worse description of what happened
+ * than this one (FA-05).
+ */
 export async function executeRun(runId: string, context: RunContext): Promise<void> {
+  try {
+    await runOnce(runId, context);
+  } catch (cause) {
+    log.error("the run could not be carried out", { runId, error: describeError(cause) });
+    await fail(runId, "start_failed", describeError(cause)).catch((unrecorded: unknown) => {
+      // With the database unreachable there is nowhere to record that the run
+      // never started. This line is then the only trace there will be.
+      log.error("could not record that the run failed to start", {
+        runId,
+        error: describeError(unrecorded),
+      });
+    });
+  }
+}
+
+/**
+ * One run, from a claimed job to a terminal state.
+ *
+ * The order of what happens here is the product's promise, in sequence:
+ * connect, open a terminal, stream every byte both ways, stop when asked, and
+ * then — whatever the exit code was — record what the script left behind.
+ * FA-09.5 is explicit that a failed run still has results, because a partial
+ * result is evidence about what the run managed to do.
+ */
+async function runOnce(runId: string, context: RunContext): Promise<void> {
   const run = await runRepository.findRunById(runId);
   if (!run) {
     log.warn("queued run has no record", { runId });
@@ -47,7 +77,7 @@ export async function executeRun(runId: string, context: RunContext): Promise<vo
 
   const script = await scriptRepository.findScriptWithSource(run.scriptId);
   if (!script) {
-    await fail(runId, "start_failed", "The script is no longer in the catalog");
+    await fail(runId, "start_failed", "The script is no longer in the catalog", run);
     return;
   }
 
@@ -64,7 +94,12 @@ export async function executeRun(runId: string, context: RunContext): Promise<vo
       host: script.source.host,
       error: describeError(cause),
     });
-    await fail(runId, "connect_failed", `Could not reach ${script.source.host}: ${describeError(cause)}`);
+    await fail(
+      runId,
+      "connect_failed",
+      `Could not reach ${script.source.host}: ${describeError(cause)}`,
+      run,
+    );
     return;
   }
 
@@ -74,7 +109,7 @@ export async function executeRun(runId: string, context: RunContext): Promise<vo
     await drive(run, script, target, context);
   } catch (cause) {
     log.error("run failed", { runId, error: describeError(cause) });
-    await fail(runId, "connection_lost", describeError(cause));
+    await fail(runId, "connection_lost", describeError(cause), run);
   } finally {
     await target.cleanup(runId).catch(() => {});
     target.close();
@@ -96,7 +131,45 @@ async function drive(
 
   const facts = await target.stat(script.script.absolutePath);
   if (!facts) {
-    await fail(runId, "start_failed", `${script.script.absolutePath} is not there any more`);
+    await fail(
+      runId,
+      "start_failed",
+      `${script.script.absolutePath} is not there any more`,
+      run,
+    );
+    return;
+  }
+
+  // FA-08.1 / ADR-003 — #50's other half: a stop that arrives while this worker
+  // is still connecting has nobody to reach. The subscriber is created below,
+  // once there is a PTY to write to, and Redis drops a message published to a
+  // channel with no subscriber — so a `starting` run was racing that window, and
+  // losing the race meant the script ran anyway while the operator, the
+  // interface and the audit trail all said it had been stopped.
+  //
+  // The request is written to the run's row *before* it is published, which is
+  // what makes it readable from here: reading the row closes this side of the
+  // window, and reading it again after subscribing closes the rest, because a
+  // request published before then is already in the row.
+  const stopAsked = await stopRequested(runId);
+  if (stopAsked) {
+    await runRepository.appendEvent(
+      runId,
+      "abort_requested",
+      `${stopAsked} asked to stop before the script started`,
+    );
+    await runRepository.transition(
+      runId,
+      "aborted",
+      { finishedAt: new Date(), failureReason: "aborted_by_user" },
+      ["starting"],
+    );
+    await recordOutcome(run, {
+      status: "aborted",
+      exitCode: null,
+      failureReason: "aborted_by_user",
+      abortStage: null,
+    });
     return;
   }
 
@@ -133,10 +206,23 @@ async function drive(
         running.resize(message.cols, message.rows);
         return;
       }
+
+      const outcome = abort.request();
+      if (outcome === "already_requested") return;
+
+      // A stop that arrived too late is recorded as what it was. An operator who
+      // pressed the button is owed the difference between "stopped" and "was
+      // already over", and the run they pressed it on is not going to change
+      // state to say so (FA-08.1).
       void runRepository
-        .appendEvent(runId, "abort_requested", `Requested by ${message.requestedBy}`)
+        .appendEvent(
+          runId,
+          "abort_requested",
+          outcome === "too_late"
+            ? `${message.requestedBy} asked after the script had already exited`
+            : `Requested by ${message.requestedBy}`,
+        )
         .catch(() => {});
-      abort.request();
     },
   });
 
@@ -149,12 +235,24 @@ async function drive(
   await runRepository.transition(runId, "running", { startedAt: new Date() }, ["starting"]);
   await runRepository.appendEvent(runId, "started", `Started ${script.script.fileName}`);
 
+  // The rest of #50's window: a stop published after the check above and before
+  // this subscriber existed reached nobody, and is in the row by now. The row is
+  // the only place it can still be heard from — and if the subscriber *did* hear
+  // it, `request()` has already been called and this is a no-op.
+  if (await stopRequested(runId)) abort.request();
+
   try {
     const exit = await running.exit;
     await publisher.flush();
 
-    const status = abort.wasRequested ? "aborted" : exit.code === 0 ? "succeeded" : "failed";
-    const failureReason: RunFailureReason | null = abort.wasRequested
+    // Decided by what happened, not by what was asked for. An abort that arrived
+    // after the script had already exited is not an abort: the run did what it
+    // did, and recording it as stopped would both lie about the script and take
+    // the run out of FA-10.2's *last successful* on the strength of a late click
+    // (ADR-003 keeps `aborted` for a run a human really stopped).
+    const stopped = abort.wasSignalled;
+    const status = stopped ? "aborted" : exit.code === 0 ? "succeeded" : "failed";
+    const failureReason: RunFailureReason | null = stopped
       ? "aborted_by_user"
       : exit.code === 0
         ? null
@@ -180,14 +278,39 @@ async function drive(
       exit.signal ? `Killed by ${exit.signal}` : `Exited ${exit.code ?? "unknown"}`,
     );
 
+    await recordOutcome(run, {
+      status,
+      exitCode: exit.code,
+      failureReason,
+      abortStage: abort.stage,
+    });
+
     // FA-07.2: the durable copy of the scrollback, so the capped stream may
     // expire without taking the history with it.
-    await runRepository.saveTranscript(
-      runId,
-      transcript.toBase64(),
-      transcript.sizeBytes,
-      transcript.truncated,
-    );
+    //
+    // Kept out of the collection's `try` below, because they are two promises
+    // and neither may take the other down with it. Sharing one made the
+    // transcript the collection's failure: a database blip on the way in meant a
+    // run that wrote files showed none of them, permanently and with no error a
+    // person would trust — the failure was reported against a run already
+    // written `succeeded`, so the record meant to say so was itself rejected.
+    // The scrollback is recoverable from nothing, so losing it is worth a run
+    // event; losing the results is what FA-09.5 exists to forbid.
+    try {
+      await runRepository.saveTranscript(
+        runId,
+        transcript.toBase64(),
+        transcript.sizeBytes,
+        transcript.truncated,
+      );
+    } catch (cause) {
+      log.error("could not persist the transcript", { runId, error: describeError(cause) });
+      await runRepository.appendEvent(
+        runId,
+        "error",
+        `Transcript not persisted: ${describeError(cause)}`,
+      );
+    }
 
     await collect(target, runId, run.outputPath, before);
   } finally {
@@ -260,7 +383,12 @@ async function collect(
   }
 }
 
-async function fail(runId: string, reason: RunFailureReason, message: string): Promise<void> {
+async function fail(
+  runId: string,
+  reason: RunFailureReason,
+  message: string,
+  run: schema.RunRow | null = null,
+): Promise<void> {
   await runRepository.transition(
     runId,
     "failed",
@@ -268,4 +396,78 @@ async function fail(runId: string, reason: RunFailureReason, message: string): P
     ["queued", "starting", "running"],
   );
   await runRepository.appendEvent(runId, "error", message);
+
+  // A run that never started is still a run, and FA-12.1 asks for its outcome
+  // as much as for any other's. The row is missing only where the worker could
+  // not read it at all, which is the case the caller has nothing to write from
+  // either.
+  if (run) {
+    await recordOutcome(run, {
+      status: "failed",
+      exitCode: null,
+      failureReason: reason,
+      abortStage: null,
+    });
+  }
+}
+
+/**
+ * Who asked to stop this run, if anyone — read from the run's own row rather
+ * than from the control channel (#50).
+ *
+ * `recordAbortRequest` writes the row *before* the control message is published,
+ * which is what makes it readable here and what makes the two checks in `drive`
+ * complete: a request this worker did not hear is still a request, and it must
+ * not be answered with a script that runs across the estate anyway.
+ */
+async function stopRequested(runId: string): Promise<string | null> {
+  const row = await runRepository.findRunById(runId).catch(() => null);
+  if (!row?.abortRequestedAt) return null;
+  return row.abortRequestedBy ?? "An operator";
+}
+
+/**
+ * FA-12.1's other half, and the half that had no writer at all.
+ *
+ * *"Every run is recorded in full: who started what, where, when, with which
+ * outcome."* `run_started` carries the first four. The fifth was in the
+ * vocabulary — `run_finished` sits next to `run_started` and `run_aborted` in
+ * `auditActionSchema` — and nothing anywhere produced one, so the one question
+ * an audit trail exists to answer about a script that touched the estate, *did
+ * it finish and how*, was answered only by `runs.status`: the operational
+ * record, and still mutable by a later transition.
+ *
+ * Written from here because this is the process that knows. It holds the exit
+ * code and writes the transition that ends the run, and the operator who
+ * started it is on the run record (FA-12.1) that it read to do so.
+ *
+ * `sourceIp` is null, deliberately: the source address belongs to the request
+ * that started the run and this process never saw that request — `run_started`
+ * carries it, and inventing one here would be worse than leaving it out.
+ */
+async function recordOutcome(
+  run: schema.RunRow,
+  outcome: {
+    status: RunStatus;
+    exitCode: number | null;
+    failureReason: RunFailureReason | null;
+    abortStage: AbortStage | null;
+  },
+): Promise<void> {
+  await audit.record({
+    actor: run.startedBy,
+    action: "run_finished",
+    subject: run.scriptFileName,
+    areaId: run.areaId,
+    runId: run.id,
+    outcome: outcome.status === "failed" ? "failure" : "success",
+    detail: {
+      status: outcome.status,
+      exitCode: outcome.exitCode,
+      failureReason: outcome.failureReason,
+      abortStage: outcome.abortStage,
+      host: run.host,
+    },
+    sourceIp: null,
+  });
 }

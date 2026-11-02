@@ -9,8 +9,13 @@ export default defineConfig({
     // database, and two files truncating the same tables in parallel would
     // fail each other rather than the code.
     fileParallelism: false,
-    // Creates and migrates the test database, and empties it between tests.
-    setupFiles: ["./test/support/setup.ts"],
+    // The database lifecycle is not a global setup file. Most of this suite is
+    // unit tests whose repositories are mocked — several replace the whole of
+    // `@scriptoria/db` — and a global setup that opens a real connection and
+    // truncates tables would run for those too, and fail on the mock it finds
+    // there. The one file that needs a database imports `./support/setup`
+    // itself, so the fixture it uses and the schema it migrates stay that
+    // file's business.
     testTimeout: 20_000,
     hookTimeout: 60_000,
   },

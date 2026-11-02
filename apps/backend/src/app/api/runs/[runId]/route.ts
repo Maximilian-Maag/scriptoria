@@ -1,6 +1,6 @@
 import { abortRunRequestSchema } from "@scriptoria/contracts";
 import { abortRun, getRun } from "@/lib/services/runService";
-import { clientIp, parseBody, requireSession } from "@/lib/http";
+import { clientIp, parseOptionalBody, parsePath, requireSession } from "@/lib/http";
 import { toResponse } from "@/lib/result";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,8 @@ export async function GET(
   if (!session.ok) return toResponse(session);
 
   const { runId } = await params;
+  const path = parsePath({ runId });
+  if (!path.ok) return toResponse(path);
   return toResponse(await getRun(session.value, runId));
 }
 
@@ -31,13 +33,14 @@ export async function DELETE(
   if (!session.ok) return toResponse(session);
 
   // An abort with no body at all is the read-only case, which needs no
-  // confirmation — so a missing body is an empty request rather than an error.
-  const body = request.headers.get("content-length") === "0" || !request.body
-    ? { ok: true as const, value: {} }
-    : await parseBody(request, abortRunRequestSchema);
+  // confirmation — so a request carrying nothing is an empty one, not a
+  // malformed one.
+  const body = await parseOptionalBody(request, abortRunRequestSchema);
   if (!body.ok) return toResponse(body);
 
   const { runId } = await params;
+  const path = parsePath({ runId });
+  if (!path.ok) return toResponse(path);
   return toResponse(
     await abortRun(session.value, runId, body.value, { sourceIp: clientIp(request) }),
   );
