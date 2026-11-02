@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-down dev-logs run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
+.PHONY: help install dev dev-down dev-logs ports run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
 
 # pnpm is installed via the standalone script — add its bin dir to PATH so make can find it
 PNPM_HOME ?= $(HOME)/.local/share/pnpm
@@ -11,11 +11,37 @@ PNPM := pnpm
 COMPOSE ?= docker compose
 COMPOSE_FILE := infra/docker-compose.dev.yml
 
+# ── The dev stack's host ports ────────────────────────────────────────────────
+# Read back out of the addresses the apps are configured with, rather than
+# declared a second time here. The apps take a full URL and compose takes a port,
+# so a machine that already runs another project's Postgres — which is the whole
+# reason the defaults are 5433 and 8089 rather than 5432 and 8088 — moves this
+# stack by editing the one address in .env that collided, and the containers, the
+# URLs and the test databases all follow together. Two lists is how the two come
+# to disagree.
+#
+# `port_in(<variable>)` is the port out of the address that variable holds in
+# .env. Nothing matches when .env is absent, and compose then falls back to the
+# default in its own `${VAR:-default}`.
+port_in = $(shell sed -n 's#^$1=.*:\([0-9][0-9]*\).*$$#\1#p' .env 2>/dev/null | head -1)
+
+POSTGRES_PORT ?= $(call port_in,DATABASE_URL)
+REDIS_PORT ?= $(call port_in,REDIS_URL)
+LDAP_PORT ?= $(call port_in,LDAP_URL)
+# Nothing reads this one out of an address: Structurizr is read by a person, not
+# a process, and no URL in .env points at it.
+STRUCTURIZR_PORT ?= 8089
+
+# Exported so compose interpolates them. The sshd fixture's port is deliberately
+# not one of these — see the note in infra/docker-compose.dev.yml.
+export POSTGRES_PORT REDIS_PORT LDAP_PORT STRUCTURIZR_PORT
+
 help:
 	@echo "Usage: make <target>"
 	@echo ""
 	@echo "  install               install all workspace dependencies"
 	@echo "  dev                   start the dev stack (postgres, redis, openldap, sshd fixture, structurizr)"
+	@echo "  ports                 show the host ports the dev stack resolved to (they follow .env)"
 	@echo "  dev-down              stop the dev stack"
 	@echo "  dev-logs              follow the dev stack logs"
 	@echo "  run                   start frontend, backend and runner together (requires: make dev)"
@@ -51,6 +77,7 @@ install:
 # Everything the apps talk to, and nothing the apps themselves run in — the three
 # Node processes run locally via `make run` so a restart is a restart, not a rebuild.
 dev:
+	@echo "  dev stack: postgres:$(POSTGRES_PORT) redis:$(REDIS_PORT) openldap:$(LDAP_PORT) — make ports"
 	$(COMPOSE) -f $(COMPOSE_FILE) up -d --wait
 
 dev-down:
@@ -58,6 +85,15 @@ dev-down:
 
 dev-logs:
 	$(COMPOSE) -f $(COMPOSE_FILE) logs -f
+
+# What the stack resolved to. Worth asking when a port was moved and something is
+# still talking to the old one.
+ports:
+	@echo "  postgres    localhost:$(POSTGRES_PORT)"
+	@echo "  redis       localhost:$(REDIS_PORT)"
+	@echo "  openldap    localhost:$(LDAP_PORT)"
+	@echo "  sshd        localhost:2222  (fixed — infra/docker-compose.dev.yml)"
+	@echo "  structurizr http://localhost:$(STRUCTURIZR_PORT)"
 
 run:
 	$(PNPM) --parallel --filter frontend --filter backend --filter runner dev
@@ -96,7 +132,7 @@ test:
 # It runs against its own database rather than the one `make run` uses, so a
 # suite run cannot rewrite the area an operator is looking at, and so the state
 # it asserts on is the state its own migrate-and-seed put there.
-E2E_DATABASE_URL ?= postgres://postgres:postgres@localhost:5433/scriptoria_e2e
+E2E_DATABASE_URL ?= postgres://postgres:postgres@localhost:$(POSTGRES_PORT)/scriptoria_e2e
 
 # One requirement can be run on its own, by naming any Playwright filter:
 #
@@ -108,11 +144,15 @@ E2E_DATABASE_URL ?= postgres://postgres:postgres@localhost:5433/scriptoria_e2e
 # log. Empty means the whole suite, which is what a developer wants.
 E2E_SPECS ?=
 
+# The suite checks the stack is up before it starts anything (src/global-setup.ts),
+# on the ports it is told about — and those have to be the ports .env named, or a
+# stack that was moved reads as a stack that is not running.
 test-e2e: test-db
 	@echo "  e2e database: $(E2E_DATABASE_URL)"
 	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) --filter @scriptoria/db db:migrate
 	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) --filter @scriptoria/db db:seed
-	@DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) test:e2e $(if $(E2E_SPECS),-- $(E2E_SPECS),)
+	@E2E_PG_PORT=$(POSTGRES_PORT) E2E_REDIS_PORT=$(REDIS_PORT) E2E_LDAP_PORT=$(LDAP_PORT) \
+	  DATABASE_URL="$(E2E_DATABASE_URL)" $(PNPM) test:e2e $(if $(E2E_SPECS),-- $(E2E_SPECS),)
 
 # The backend suite creates its own database on first run — one per working
 # directory, so two runs cannot truncate each other's tables. This target only
