@@ -234,6 +234,13 @@ the enums. It is a first-run mismatch rather than a schema problem: drop the dat
 production-shaped ones — TLS verification on, `Secure` cookies — and the example file is what
 turns them off for plain-http development.
 
+A machine that already runs another project's Postgres — or Redis, or a directory — moves this
+stack by editing the one address in `.env` that collided. The Makefile reads the host ports back
+out of those addresses and hands them to compose, so the containers, the URLs, and the test and
+e2e databases follow together instead of drifting apart; `make ports` prints what resolved. The
+sshd fixture's port is deliberately not one of them: four end-to-end specs assert the address a
+run recorded, and the thing that fixture stands in for — a script VM — does not move either.
+
 The seeded directory accounts all use the password `Passw0rd!`:
 
 | Account | Groups | What it demonstrates |
