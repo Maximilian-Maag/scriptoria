@@ -113,6 +113,14 @@ export const runSchema = z.object({
 
   /** Present once the collector has listed the output directory. */
   resultCount: z.number().int().min(0).nullable(),
+
+  /**
+   * When the collection ended, however it ended — the fact a view polls on.
+   *
+   * A null `resultCount` beside a set `collectedAt` means the collection is
+   * finished and found nothing it could record, not that it is still running.
+   */
+  collectedAt: z.string().datetime({ offset: true }).nullable(),
 });
 export type Run = z.infer<typeof runSchema>;
 

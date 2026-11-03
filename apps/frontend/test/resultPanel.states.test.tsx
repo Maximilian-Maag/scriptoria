@@ -41,6 +41,7 @@ function finishedRun(): Run {
     failureReason: "exit_code",
     lastStreamId: null,
     resultCount: 0,
+    collectedAt: "2026-09-23T04:06:31.000Z",
   };
 }
 

@@ -15,3 +15,4 @@ One file per decision that was not obvious and would otherwise be re-litigated. 
 | [008](008-the-audit-log-is-the-root-accounts.md) | The audit log is the root account's, and reading it is not audited | Proposed |
 | [009](009-generated-rest-contract-without-a-renderer.md) | The REST contract is generated from the schemas, and its page ships no renderer | Accepted |
 | [010](010-the-images-ship-typescript.md) | The images ship TypeScript and run it through tsx | Accepted |
+| [011](011-a-run-records-the-end-of-its-collection.md) | A run records the end of its own collection, and views read it instead of a clock | Accepted |

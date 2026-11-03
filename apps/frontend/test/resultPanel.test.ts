@@ -62,6 +62,7 @@ function run(overrides: Partial<Run> = {}): Run {
     failureReason: null,
     lastStreamId: null,
     resultCount: 1,
+    collectedAt: null,
     ...overrides,
   };
 }
@@ -98,10 +99,20 @@ describe("the results list's refresh (FA-09.1, FA-09.5)", () => {
     expect(resultsRefetchInterval(listing(false, 0), run({ resultCount: 0 }))).toBe(false);
   });
 
-  it("stops once the collection has had its chance, even if it never reported", () => {
-    // `resultCount` stays null when the collector failed rather than finished;
-    // the grace period in `collectionSettled` is what ends the polling then.
-    expect(resultsRefetchInterval(listing(false, 0), run({ resultCount: null }))).toBe(false);
+  it("stops once the collection ended, even if it recorded nothing", () => {
+    // A collection that failed, and a run nobody will collect at all, end the
+    // same way: a timestamp and no count. The interface reads that fact instead
+    // of waiting out a timer.
+    const ended = run({ resultCount: null, collectedAt: "2026-03-04T09:16:01.000Z" });
+    expect(resultsRefetchInterval(listing(false, 0), ended)).toBe(false);
+  });
+
+  it("keeps asking while a collection has no end, however long it has been", () => {
+    // Not a stopwatch. A null count with no collection end means the collector
+    // is still working, and hundreds of files fetched one at a time over SFTP
+    // take as long as they take — stopping here is the defect this exists to
+    // prevent (#97).
+    expect(resultsRefetchInterval(listing(false, 0), run({ resultCount: null }))).toBe(KEEP_ASKING);
   });
 });
 

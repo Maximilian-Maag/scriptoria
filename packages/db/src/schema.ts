@@ -231,6 +231,19 @@ export const runs = pgTable(
     abortStage: abortStage("abort_stage"),
 
     resultCount: integer("result_count"),
+
+    /**
+     * When the collection ended — a fact, not a bound.
+     *
+     * `resultCount` says what the collector found, and is null until it has
+     * looked; this says only that the looking is over, which is the part a view
+     * polls on. It is written on every path that ends a collection: the listing,
+     * the listing *failing*, a queued run cancelled before a worker claimed it
+     * (nothing will ever be collected), and a run whose worker was reaped.
+     *
+     * Without it the interface had to guess, and the guess was elapsed time.
+     */
+    collectedAt: timestamp("collected_at", { withTimezone: true }),
   },
   (table) => [
     index("runs_area_queued_idx").on(table.areaId, table.queuedAt),
