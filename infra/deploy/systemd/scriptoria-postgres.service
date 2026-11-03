@@ -28,8 +28,9 @@ KillMode=mixed
 # The bootstrap variables the image reads, and the connection strings the apps
 # read, are in the same file on purpose — see scripts/check-env.sh, which fails
 # when they disagree rather than letting the deployment discover it at login.
+Environment=BIND_ADDRESS=127.0.0.1
 EnvironmentFile=-/etc/scriptoria/%N.env
-LoadCredential=app:/etc/scriptoria/app.env
+LoadCredential=app.env:/etc/scriptoria/app.env
 
 # A restart of the database is a restart of everything that talks to it, so the
 # container is stopped with a real timeout rather than a SIGKILL: PostgreSQL
@@ -42,7 +43,7 @@ ExecStart=/usr/bin/podman run \
   --pull=never \
   --network=scriptoria \
   --env-file=%d/app.env \
-  --publish ${BIND_ADDRESS:-127.0.0.1}:5432:5432 \
+  --publish ${BIND_ADDRESS}:5432:5432 \
   --volume /var/lib/scriptoria/postgres:/var/lib/postgresql/data:Z \
   --detach=false \
   --log-driver=journald \

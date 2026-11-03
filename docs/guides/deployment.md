@@ -76,7 +76,7 @@ Then, per host, all of it an operator's to place:
 | `/etc/scriptoria/tls/` | `fullchain.pem` and `privkey.pem` for the public name. The organisation's own CA — NFR-01's network has no route out to a public one. |
 | `/etc/scriptoria/ssh/` | The script VM's key (`id_ed25519`) and its `known_hosts`. Runner instances only. |
 | `/etc/scriptoria/ldifs/` | The directory's LDIFs. Directory instances only, and the organisation's own — the fixture in `infra/openldap/ldifs` is four invented accounts for a development machine. |
-| `/etc/scriptoria/scriptoria-<unit>.env` | Per-instance values, and in practice one: the port a control-plane process is published on. |
+| `/etc/scriptoria/scriptoria-<unit>.env` | Per-instance values, and in practice two: `HOST_PORT`, the port a control-plane process is published on — required, not optional, for every `scriptoria-backend@N` — and `BIND_ADDRESS`, the address a store or the directory publishes on. |
 
 ### The one thing that costs an afternoon
 
@@ -86,6 +86,16 @@ instance, the directory, the script VM — it is that instance's VPC address. `c
 `localhost` and `127.0.0.1` in a deployment's configuration for exactly this reason, because the
 failure it causes ("connection refused" from a container that is running perfectly) points at the
 wrong component.
+
+**And the other half of the same mistake: `BIND_ADDRESS`.** The stores and the directory publish on
+`127.0.0.1` by default, which is right when they share a machine with the app — dev — and wrong the
+moment they do not: staging's and production's app instance reaches PostgreSQL over the environment's
+private network, so the data instance has to publish on the address it was given, not on loopback.
+Set `BIND_ADDRESS` in `/etc/scriptoria/scriptoria-postgres.env`, `scriptoria-redis.env` and
+`scriptoria-openldap.env` to the machine's address from the apply's `instances` output, and point
+`DATABASE_URL`, `REDIS_URL` and `LDAP_URL` in `app.env` at that same address. A store bound to
+loopback on its own machine is a store nothing can reach, and the error reads as though the store
+were down.
 
 ### The configuration is one file, and it is checked
 
@@ -160,7 +170,13 @@ before a schema change is for.
 instance, verifies the archive lists, and keeps a fortnight. The unit fails if the dump cannot be
 read back, because a dump nobody has looked at is a file rather than a backup.
 
+`install.sh` enables the timer on every host, because a backup that depends on somebody remembering
+to switch it on is a backup that does not exist. The unit then skips itself where there is no store
+container, so an app or runner instance runs no backup and reports no failure — and the timer being
+enabled everywhere is why nothing else has to know which machine is the data instance.
+
     sudo systemctl start scriptoria-backup.service     # by hand, e.g. before a schema change
+    systemctl list-timers scriptoria-backup.timer      # when the next one is due
 
 The dump does **not** leave the host. That is deliberate: NFR-01 puts the environment in a network
 with no route out, so there is nowhere for a timer to push it, and moving it is an operator's job

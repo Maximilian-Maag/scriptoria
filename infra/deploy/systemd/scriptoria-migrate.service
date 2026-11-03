@@ -26,8 +26,9 @@ Group=scriptoria
 
 Environment=XDG_RUNTIME_DIR=/run/user/%U
 Delegate=yes
+Environment=IMAGE_TAG=latest
 EnvironmentFile=-/etc/scriptoria/%N.env
-LoadCredential=app:/etc/scriptoria/app.env
+LoadCredential=app.env:/etc/scriptoria/app.env
 
 ExecStartPre=-/usr/bin/podman rm --force --ignore %N
 ExecStart=/usr/bin/podman run \
@@ -39,7 +40,7 @@ ExecStart=/usr/bin/podman run \
   --workdir /app/packages/db \
   --detach=false \
   --log-driver=journald \
-  scriptoria-backend:${IMAGE_TAG:-latest} \
+  scriptoria-backend:${IMAGE_TAG} \
   node --import tsx src/migrate.ts
 TimeoutStartSec=300
 

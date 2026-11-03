@@ -75,6 +75,15 @@ install -m 0755 "$deploy/scripts/backup.sh" /etc/scriptoria/backup.sh
 install -m 0644 "$deploy"/systemd/* /etc/systemd/system/
 systemctl daemon-reload
 
+# ── The backup timer ──────────────────────────────────────────────────────────
+# Enabled here rather than left to the operator, because a backup nobody remembered
+# to switch on is a backup that does not exist. It is enabled on every host and the
+# unit skips itself where the store is not running (see scriptoria-backup.service),
+# so the only thing an operator has to get right is the store being on the data
+# instance in the first place.
+systemctl enable --now scriptoria-backup.timer > /dev/null
+echo "enabled scriptoria-backup.timer"
+
 # ── The network the containers share ──────────────────────────────────────────
 # Named rather than the default, so that "which containers can talk to each other"
 # is answered by this deployment rather than by podman's defaults.
