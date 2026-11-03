@@ -23,28 +23,34 @@ how `main` and `dev` start disagreeing about what is in a release.
 `dev` is the default branch, so a clone and a fresh topic branch start from what
 is actually being built rather than from the last release.
 
-### A promotion is a rebase merge, and the ladder depends on it
+### A promotion carries an alignment commit, and here is why
 
-After every promotion, `staging` and `main` have to be *exactly the commit* they were promoted
-from — not a new commit with the same content. The reason is the merge base, and it is worth
-being precise about, because the failure it causes looks like something else.
+After every promotion, `staging` and `main` have `dev`'s **content**. They do not — and cannot, as
+things are configured — share `dev`'s **ancestry**, and the difference is the whole of this section.
 
-The three branches share history up to a merge base that predates the promotions. A **squash**
-merge writes a new commit on the target which the source branch does not contain, so that merge
-base does not move: every later promotion's diff still spans work that was already promoted, and
-by the second one it conflicts. GitHub will then not even run the workflows — it cannot build a
-merge commit for a conflicting pull request — so the pull request reports *no checks* instead of
-a conflict, which reads as a workflow problem and is not one.
+The three branches share history up to a merge base that predates the promotions, and nothing
+GitHub's merge button offers moves that base. A squash writes a new commit the source branch does
+not contain. So does a rebase merge: GitHub re-creates the commits with its own committer
+metadata, so even a branch that is a strict descendant of the target comes out with different
+hashes. (A local `git rebase` onto its own ancestor *is* an identity — which is what makes this
+counter-intuitive — but GitHub's is not.)
 
-**Rebase and merge** is the other way round. When the source branch is a strict descendant of the
-target, rebasing its commits onto their own ancestor is an identity operation: every commit hash
-is unchanged, so the target lands on the source's head. Verified rather than assumed — rebasing a
-branch onto its own ancestor leaves every hash alone. The next promotion is then a clean
-fast-forward with a diff of exactly what is being promoted.
+So a pull request from `dev` into a release branch is not a fast-forward and not a small diff: it
+is everything since that stale merge base. By the second promotion it conflicts, and GitHub then
+will not run the workflows at all — it cannot build a merge commit — so the pull request reports
+*no checks* instead of a conflict, which reads as a workflow problem and is not one.
 
-So: promote with a rebase merge, and never merge a release branch back into `dev`. A squash on a
-release branch is how a ladder ends up needing a repair: two branches with the same content, a
-stale merge base, and a pull request between them that cannot be built.
+A promotion therefore goes through an **alignment branch**: cut from the release branch, with its
+tree set to `dev`'s. The pull request's diff is then exactly the work being promoted.
+
+    git switch -c align-staging origin/staging
+    git read-tree -u --reset origin/dev
+    git commit -m "chore: align <branch> with dev"
+
+Making a promotion a plain pull request from `dev` — a real fast-forward — needs the release
+branches to accept a merge commit or a local push, and both protections (`required_linear_history`
+and `allow_force_pushes`) say no. That is a decision for whoever owns the protections; until it is
+taken, an alignment branch is the shape that works, and it is why one appears in the history.
 
 ## Topic branches
 
