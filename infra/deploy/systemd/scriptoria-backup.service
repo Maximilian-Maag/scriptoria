@@ -1,0 +1,40 @@
+# Scriptoria — the database backup.
+#
+# Run by scriptoria-backup.timer, and also by hand before a release that changes
+# the schema. It is a one-shot container rather than a cron entry on the host, so
+# that the tool doing the dumping is the same PostgreSQL that is being dumped.
+
+[Unit]
+Description=Scriptoria database backup
+Documentation=https://github.com/Maximilian-Maag/scriptoria
+Requires=scriptoria-postgres.service
+After=scriptoria-postgres.service
+
+[Service]
+Type=oneshot
+User=scriptoria
+Group=scriptoria
+
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Delegate=yes
+
+EnvironmentFile=-/etc/scriptoria/%N.env
+LoadCredential=app:/etc/scriptoria/app.env
+
+ExecStartPre=-/usr/bin/podman rm --force --ignore %N
+ExecStart=/usr/bin/podman run \
+  --rm \
+  --name %N \
+  --pull=never \
+  --network=scriptoria \
+  --env-file=%d/app.env \
+  --volume /var/lib/scriptoria/backups:/backups:Z \
+  --volume /etc/scriptoria/backup.sh:/backup.sh:ro \
+  --entrypoint /bin/sh \
+  --detach=false \
+  --log-driver=journald \
+  postgres:16-alpine \
+  /backup.sh
+TimeoutStartSec=1800
+
+NoNewPrivileges=yes
