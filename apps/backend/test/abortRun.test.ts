@@ -101,6 +101,14 @@ describe("aborting a run that has not started", () => {
     // subscribed, so a published stop is dropped on the floor.
     expect(recordAbortRequest).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
+    // The collection is over before it began: nothing was started, so there is no
+    // output directory to list. It travels in the same write as the cancellation,
+    // because a view that is not told this waits for a file that never comes —
+    // and a second write could be skipped by a failed event append.
+    expect(transition.mock.calls[0]?.[2]).toMatchObject({
+      failureReason: "aborted_by_user",
+      collectedAt: expect.any(Date),
+    });
     // FA-12.1 — the audit says what happened, and it is now true.
     expect(record).toHaveBeenCalledTimes(1);
     expect(record.mock.calls[0]?.[0]).toMatchObject({

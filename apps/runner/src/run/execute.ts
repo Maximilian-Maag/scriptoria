@@ -161,7 +161,7 @@ async function drive(
     await runRepository.transition(
       runId,
       "aborted",
-      { finishedAt: new Date(), failureReason: "aborted_by_user" },
+      { finishedAt: new Date(), failureReason: "aborted_by_user", collectedAt: new Date() },
       ["starting"],
     );
     await recordOutcome(run, {
@@ -369,7 +369,7 @@ async function collect(
       })),
     );
 
-    await runRepository.setResultCount(runId, count);
+    await runRepository.markCollected(runId, count);
     await runRepository.appendEvent(
       runId,
       "collected",
@@ -379,6 +379,13 @@ async function collect(
     // A collection that failed must not rewrite how the run ended. The script
     // did what it did; this is the platform failing to look afterwards.
     log.error("could not collect the results", { runId, error: describeError(cause) });
+
+    // It is over, though, and saying so is what stops a view polling for an
+    // answer that is not coming: the listing failed, so no count will follow it.
+    // `markCollectionEnded` rather than `markCollected`: this must not touch a
+    // count that the success path above already wrote, in the case where it got
+    // that far and it is the event append that failed.
+    await runRepository.markCollectionEnded(runId);
     await runRepository.appendEvent(runId, "error", `Result collection failed: ${describeError(cause)}`);
   }
 }
@@ -389,10 +396,14 @@ async function fail(
   message: string,
   run: schema.RunRow | null = null,
 ): Promise<void> {
+  // `collectedAt` travels in the same write as the status, deliberately: this run
+  // is over and no worker is left to list its output directory, so the collection
+  // is over with it. One statement also means an append that fails below cannot
+  // leave the run terminal, uncollected, and polled for ever.
   await runRepository.transition(
     runId,
     "failed",
-    { finishedAt: new Date(), failureReason: reason },
+    { finishedAt: new Date(), failureReason: reason, collectedAt: new Date() },
     ["queued", "starting", "running"],
   );
   await runRepository.appendEvent(runId, "error", message);

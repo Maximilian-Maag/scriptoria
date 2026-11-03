@@ -214,7 +214,7 @@ export async function abortRun(
     const cancelled = await runRepository.transition(
       runId,
       "aborted",
-      { finishedAt: new Date(), failureReason: "aborted_by_user" },
+      { finishedAt: new Date(), failureReason: "aborted_by_user", collectedAt: new Date() },
       ["queued"],
     );
 
@@ -266,11 +266,35 @@ export async function abortRun(
  * longer exists. The claim key is what tells them apart: it is renewed while a
  * worker holds the run, so its absence means nobody does.
  *
+ * Two shapes of it, and the second is the one the explicit collection signal
+ * cannot record by itself. A run still `starting` or `running` is failed. A run
+ * that is *terminal* but uncollected is the worker that died between writing the
+ * status and listing the output directory — nothing will record that end, and
+ * without it the interface polls a run that is over for ever.
+ *
  * Called from the run reads rather than by a sweeper, because a stale row only
  * matters to somebody looking at it.
  */
 export async function reapIfOrphaned(run: Run): Promise<Run> {
-  if (isTerminalStatus(run.status) || run.status === "queued") return run;
+  if (run.status === "queued") return run;
+
+  if (isTerminalStatus(run.status)) {
+    // The common case, and it costs nothing: a run that is over and has recorded
+    // its collection is not worth a Redis round trip.
+    if (run.resultCount !== null || run.collectedAt) return run;
+
+    // Cheap before the round trip, and it is also what keeps this from racing the
+    // collector of a run that finished a moment ago.
+    const endedAt = run.finishedAt ? Date.parse(run.finishedAt) : Date.parse(run.queuedAt);
+    if (Date.now() - endedAt < ORPHAN_GRACE_MS) return run;
+
+    // A worker is still working on it (the claim is renewed while it is), so the
+    // collection may yet land: leave it alone.
+    if (await redis().exists(keys.runClaim(run.id))) return run;
+
+    await runRepository.markCollectionEnded(run.id);
+    return { ...run, collectedAt: new Date().toISOString() };
+  }
 
   const held = await redis().exists(keys.runClaim(run.id));
   if (held) return run;
@@ -281,10 +305,14 @@ export async function reapIfOrphaned(run: Run): Promise<Run> {
   const startedAt = run.startedAt ? Date.parse(run.startedAt) : Date.parse(run.queuedAt);
   if (Date.now() - startedAt < ORPHAN_GRACE_MS) return run;
 
+  // `collectedAt` in the same statement as the status: the collection is over
+  // with the worker. The claim key is the evidence all of this rests on — a
+  // worker renews it for as long as it is working, so its absence means nobody is
+  // left to list the output directory.
   await runRepository.transition(
     run.id,
     "failed",
-    { finishedAt: new Date(), failureReason: "worker_lost" },
+    { finishedAt: new Date(), failureReason: "worker_lost", collectedAt: new Date() },
     ["starting", "running"],
   );
   await runRepository.appendEvent(run.id, "error", "The worker holding this run is gone");

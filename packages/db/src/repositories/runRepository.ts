@@ -28,6 +28,7 @@ const toRun = (row: schema.RunRow): Run => ({
   failureReason: (row.failureReason as RunFailureReason | null) ?? null,
   lastStreamId: row.lastStreamId,
   resultCount: row.resultCount,
+  collectedAt: row.collectedAt?.toISOString() ?? null,
 });
 
 export async function createRun(input: {
@@ -139,6 +140,7 @@ export async function transition(
     lastStreamId: string | null;
     abortStage: AbortStage | null;
     resultCount: number | null;
+    collectedAt: Date;
   }> = {},
   from?: readonly RunStatus[],
 ): Promise<boolean> {
@@ -163,12 +165,33 @@ export async function recordAbortRequest(id: string, requestedBy: string): Promi
 }
 
 /**
- * Set by the collector once the output directory has been listed. Separate from
- * `transition` on purpose: the count says what the run left behind, and must
- * not be able to move the run to a different state on its way in.
+ * The collection is over and this is what it found — the collector's write.
+ *
+ * `collectedAt` is what a view polls on and `resultCount` is what it displays,
+ * so they are written together: a collection that ended has both, and one that
+ * ended by failing has neither of these (see `markCollectionEnded`).
  */
-export async function setResultCount(id: string, count: number): Promise<void> {
-  await db().update(schema.runs).set({ resultCount: count }).where(eq(schema.runs.id, id));
+export async function markCollected(id: string, count: number): Promise<void> {
+  await db()
+    .update(schema.runs)
+    .set({ collectedAt: new Date(), resultCount: count })
+    .where(eq(schema.runs.id, id));
+}
+
+/**
+ * Nothing is going to be collected for this run — the platform's write, for the
+ * ends nobody collects.
+ *
+ * A run cancelled before a worker claimed it, one whose start failed, one whose
+ * worker is gone. It touches `collectedAt` alone, and that is the point: it
+ * cannot then overwrite a count a collection has already recorded, and "nothing
+ * will be collected" is not the same claim as "it collected nothing".
+ */
+export async function markCollectionEnded(id: string): Promise<void> {
+  await db()
+    .update(schema.runs)
+    .set({ collectedAt: new Date() })
+    .where(eq(schema.runs.id, id));
 }
 
 export async function appendEvent(
