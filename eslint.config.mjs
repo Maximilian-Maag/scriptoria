@@ -52,6 +52,9 @@ export default tseslint.config(
       "**/checkSchemaDrift.ts",
       "**/drizzle.config.ts",
     ],
+    // These run in Node rather than in a browser or a bundle, so `process` is
+    // theirs to read. Everywhere else, reading it is a mistake worth catching.
+    languageOptions: { globals: { process: "readonly" } },
     rules: { "no-console": "off" },
   },
 

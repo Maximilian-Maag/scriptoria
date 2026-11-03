@@ -25,7 +25,7 @@ help:
 	@echo "  build                 build all workspace packages"
 	@echo "  lint                  lint all apps and packages"
 	@echo "  type-check            TypeScript type-check everything"
-	@echo "  test                  run unit and integration tests"
+	@echo "  test                  run unit and integration tests (the backend leg needs the dev stack)"
 	@echo "  test-e2e              run the Playwright end-to-end suite (needs a live stack: make dev)"
 	@echo "                        E2E_SPECS=tests/05-stop.spec.ts runs one requirement's specs"
 	@echo "  test-db               create the test and e2e databases in the running Postgres"
@@ -173,8 +173,15 @@ db-studio:
 db-seed:
 	$(PNPM) --filter @scriptoria/db db:seed
 
+# The terminal's WebSocket address is compiled into the frontend bundle rather
+# than read from the environment at runtime (see apps/frontend/Dockerfile), so
+# it is an argument to the build and differs per environment.
+TERMINAL_WS_URL ?= ws://localhost:3001
+
 docker-build-frontend:
-	docker build -t scriptoria-frontend:latest -f apps/frontend/Dockerfile .
+	docker build -t scriptoria-frontend:latest \
+	  --build-arg NEXT_PUBLIC_TERMINAL_WS_URL=$(TERMINAL_WS_URL) \
+	  -f apps/frontend/Dockerfile .
 
 docker-build-backend:
 	docker build -t scriptoria-backend:latest -f apps/backend/Dockerfile .

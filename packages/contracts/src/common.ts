@@ -78,3 +78,16 @@ export const paginated = <T extends z.ZodTypeAny>(item: T) =>
     limit: z.number().int().min(1),
     offset: z.number().int().min(0),
   });
+
+/**
+ * The same shape as a type, for the two sides that hold one rather than parse
+ * one: the services that build a page and the client that receives it. `total`
+ * is the size of the whole result, not of `items` — it is what a pager needs
+ * and the one number a caller cannot work out for itself.
+ */
+export type Paginated<T> = {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+};

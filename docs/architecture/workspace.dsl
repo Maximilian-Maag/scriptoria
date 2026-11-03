@@ -39,7 +39,7 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
                 api_results = component "Result Routes" "List, stream one file, or stream the set as a ZIP."
                 api_schedules = component "Schedule Routes" "Recurring jobs and their schedules."
                 api_audit = component "Audit Routes" "The filterable audit log. Root only."
-                api_docs = component "OpenAPI / Swagger UI" "Generated from the same schemas the routes validate with."
+                api_docs = component "OpenAPI Document" "Generated from the same schemas the routes validate with. Rendered server-side; no CDN, because NFR-01 has no route out."
                 api_health = component "Health & Metrics" "Liveness, readiness and metrics (NFR-16)."
 
                 svc_auth = component "Auth Service" "Simple bind with the caller's own credentials."
