@@ -33,8 +33,9 @@ Environment=XDG_RUNTIME_DIR=/run/user/%U
 Delegate=yes
 KillMode=mixed
 
+Environment=IMAGE_TAG=latest
 EnvironmentFile=-/etc/scriptoria/%N.env
-LoadCredential=app:/etc/scriptoria/app.env
+LoadCredential=app.env:/etc/scriptoria/app.env
 # The private key for the script VM, as a file rather than as an environment
 # variable, mounted where SSH_PRIVATE_KEY_PATH in `app.env` points. Read before
 # anything else starts: a missing key must stop the process now, not produce a run
@@ -56,7 +57,7 @@ ExecStart=/usr/bin/podman run \
   --volume %d/known_hosts:/etc/scriptoria/ssh/known_hosts:ro \
   --detach=false \
   --log-driver=journald \
-  scriptoria-runner:${IMAGE_TAG:-latest}
+  scriptoria-runner:${IMAGE_TAG}
 # Long, because stopping this process means finishing the runs it holds: a
 # SIGTERM lets a run wind up rather than killing a script partway through
 # modifying hundreds of systems (ADR-003).

@@ -7,7 +7,10 @@
 [Unit]
 Description=Scriptoria database backup
 Documentation=https://github.com/Maximilian-Maag/scriptoria
-Requires=scriptoria-postgres.service
+# `After` rather than `Requires`: a requirement would pull PostgreSQL up on a host that
+# is not the data instance, so an app instance whose timer fired would start a store it
+# was never meant to run. The guard in ExecCondition is the honest version — back up if
+# there is a store on this machine, and skip quietly if there is not.
 After=scriptoria-postgres.service
 
 [Service]
@@ -18,8 +21,18 @@ Group=scriptoria
 Environment=XDG_RUNTIME_DIR=/run/user/%U
 Delegate=yes
 
+# The timer is enabled on every host, because deciding which host is the data instance is
+# the operator's business and a backup nobody remembered to switch on is a backup that
+# does not exist. Where there is no store container the unit skips rather than fails: a
+# unit that reports a failure every day on three machines out of five is a unit whose
+# failures stop being read.
+#
+# A store that exists but is stopped is not skipped — the dump then fails and says so,
+# which is the right amount of noise for a backup that did not happen.
+ExecCondition=/usr/bin/podman container exists scriptoria-postgres
+
 EnvironmentFile=-/etc/scriptoria/%N.env
-LoadCredential=app:/etc/scriptoria/app.env
+LoadCredential=app.env:/etc/scriptoria/app.env
 
 ExecStartPre=-/usr/bin/podman rm --force --ignore %N
 ExecStart=/usr/bin/podman run \

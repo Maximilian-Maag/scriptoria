@@ -22,6 +22,7 @@ Environment=XDG_RUNTIME_DIR=/run/user/%U
 Delegate=yes
 KillMode=mixed
 
+Environment=BIND_ADDRESS=127.0.0.1
 EnvironmentFile=-/etc/scriptoria/%N.env
 
 ExecStartPre=-/usr/bin/podman rm --force --ignore %N
@@ -30,7 +31,7 @@ ExecStart=/usr/bin/podman run \
   --name %N \
   --pull=never \
   --network=scriptoria \
-  --publish ${BIND_ADDRESS:-127.0.0.1}:6379:6379 \
+  --publish ${BIND_ADDRESS}:6379:6379 \
   --volume /var/lib/scriptoria/redis:/data:Z \
   --detach=false \
   --log-driver=journald \
