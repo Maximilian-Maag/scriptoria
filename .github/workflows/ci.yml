@@ -167,6 +167,25 @@ jobs:
       - name: Build
         run: make build
 
+  # ── Deployment ───────────────────────────────────────────────────────────────
+  #
+  # The units, the proxy configuration, and the one file an operator fills in. None
+  # of it runs here — but every failure it catches would otherwise be met on a host
+  # as a container that will not start, with the reason three layers away.
+  # `nginx -t` and `systemd-analyze verify` are the parsers those systems use
+  # themselves, and checking the deployment's own env checker against the mistakes
+  # it names is the part that keeps it from being decoration.
+  deploy:
+    name: Deployment configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: The deployment layer
+        run: make deploy-check
+
   # ── Database ─────────────────────────────────────────────────────────────────
   #
   # `packages/db` has no unit tests worth the name — its repositories need a

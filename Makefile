@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-down dev-logs ports run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
+.PHONY: help install dev dev-down dev-logs ports run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner deploy-images deploy-check deploy-check-shell deploy-check-env deploy-check-units deploy-check-nginx diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
 
 # pnpm is installed via the standalone script — add its bin dir to PATH so make can find it
 PNPM_HOME ?= $(HOME)/.local/share/pnpm
@@ -64,6 +64,8 @@ help:
 	@echo "  db-studio             open Drizzle Studio"
 	@echo "  db-seed               seed the initial root group mapping and the reference area"
 	@echo "  docker-build          build all three images"
+	@echo "  deploy-images         build the three images and pack them, with the stores, into one tarball"
+	@echo "  deploy-check          check the deployment layer: units, proxy, configuration"
 	@echo "  diagrams              render the C4 diagrams from docs/architecture/workspace.dsl (PNG + PDF)"
 	@echo "  diagrams-png          render PNG only"
 	@echo "  diagrams-pdf          render one vector PDF of the C4 diagrams in reading order"
@@ -230,6 +232,72 @@ docker-build-runner:
 	docker build -t scriptoria-runner:latest -f apps/runner/Dockerfile .
 
 docker-build: docker-build-frontend docker-build-backend docker-build-runner
+
+# ── Deployment ─────────────────────────────────────────────────────────────────
+# What runs in a provisioned environment: the units, the proxy, and the one
+# configuration file an operator fills in. Checked here rather than on a host,
+# because each of these failures is otherwise met as a container that will not
+# start, with the reason three layers away.
+DEPLOY_DIR := infra/deploy
+
+# The one check that needs a container. `nginx -t` is the only real parser for an
+# nginx configuration and it is the same one the proxy runs. Override for podman:
+# `make RUNTIME="podman" deploy-check`.
+RUNTIME ?= docker
+NGINX_IMAGE ?= nginx:1.27-alpine
+
+deploy-check: deploy-check-shell deploy-check-env deploy-check-units deploy-check-nginx
+
+deploy-check-shell:
+	@for f in $(DEPLOY_DIR)/scripts/*.sh; do sh -n $$f || exit 1; done
+	@echo "  deployment scripts parse"
+
+# The example *is* the deployment's configuration file with placeholders in it, so
+# it is checked as one — and the checker is checked against the mistakes it claims
+# to catch.
+deploy-check-env:
+	@$(DEPLOY_DIR)/scripts/check-env.sh > /dev/null
+	@echo "  app.env.example satisfies the deployment's rules"
+	@$(DEPLOY_DIR)/scripts/check-env.test.sh > /dev/null
+	@echo "  ...and the rules refuse what they claim to"
+
+# `systemd-analyze verify` reports a missing ExecStart binary, which is a fact about
+# the machine running the check rather than about the unit — podman is on the hosts
+# this deploys to and not on a build machine. Anything else it says is an error.
+deploy-check-units:
+	@fail=0; \
+	for f in $(DEPLOY_DIR)/systemd/*; do \
+	  out=$$(systemd-analyze verify "$$f" 2>&1 | grep -v 'is not executable' || true); \
+	  if [ -n "$$out" ]; then printf '%s\n' "$$out"; fail=1; fi; \
+	done; \
+	if [ $$fail -ne 0 ]; then exit 1; fi; \
+	echo "  systemd units are valid"
+
+# A throwaway certificate, because `nginx -t` loads the pair the configuration names
+# and the real one is an operator's to place.
+deploy-check-nginx:
+	@tmp=$$(mktemp -d); trap 'rm -rf $$tmp' EXIT; \
+	openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=scriptoria.invalid" \
+	  -keyout $$tmp/privkey.pem -out $$tmp/fullchain.pem 2>/dev/null; \
+	$(RUNTIME) run --rm \
+	  --entrypoint nginx \
+	  --volume "$(PWD)/$(DEPLOY_DIR)/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+	  --volume "$(PWD)/$(DEPLOY_DIR)/nginx/upstreams:/etc/nginx/scriptoria/upstreams:ro" \
+	  --volume "$$tmp:/etc/scriptoria/tls:ro" \
+	  $(NGINX_IMAGE) -t
+
+# The release's images as one tarball. The deployment carries them rather than
+# pulling them: NFR-01 puts every provisioned environment in a network with no
+# route out, so there is no registry to pull from and nothing here may depend on
+# one. The stores are in it too — they are images the data instance needs, and a
+# host that has to reach a registry for PostgreSQL is a host that will not come up.
+DEPLOY_IMAGES := scriptoria-frontend:latest scriptoria-backend:latest scriptoria-runner:latest \
+                 postgres:16-alpine redis:7-alpine bitnamilegacy/openldap:2.6
+
+deploy-images: docker-build
+	$(RUNTIME) pull $(wordlist 4,$(words $(DEPLOY_IMAGES)),$(DEPLOY_IMAGES))
+	$(RUNTIME) save --output scriptoria-images.tar $(DEPLOY_IMAGES)
+	@echo "  wrote scriptoria-images.tar — load it with $(DEPLOY_DIR)/scripts/load-images.sh"
 
 # The dev SSH keypair the runner presents to the sshd fixture. Generated, never
 # committed — .gitignore has the path. Nothing outside the dev stack accepts it.

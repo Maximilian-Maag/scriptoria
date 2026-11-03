@@ -67,6 +67,7 @@ Full requirements: [`docs/requirements/requirements.md`](docs/requirements/requi
 The architecture model: [`docs/architecture/workspace.dsl`](docs/architecture/workspace.dsl).
 The decisions behind it: [`docs/architecture/adr/`](docs/architecture/adr/).
 How the branches and CI work: [`docs/guides/branching-and-ci.md`](docs/guides/branching-and-ci.md).
+What a provisioned environment is made of: [`docs/guides/deployment.md`](docs/guides/deployment.md).
 
 ## Technology Stack
 
@@ -184,7 +185,7 @@ scriptoria/
 │   ├── docker-compose.dev.yml  # Postgres, Redis, OpenLDAP, sshd fixture, Structurizr Lite
 │   ├── sshd/                   # The stand-in script VM: reference scripts, output dir, crontab
 │   ├── openldap/               # Seeded test accounts and groups
-│   ├── deploy/                 # (planned) reverse proxy config and systemd units
+│   ├── deploy/                 # The reverse proxy, the systemd units, the deployment's configuration
 │   └── terraform/              # (planned) dev, staging and prod from shared modules
 ├── e2e/                        # Playwright — login to run to results, in a browser
 ├── scripts/                    # diagrams.ts, diagramTools.ts — render the C4 model
@@ -325,6 +326,12 @@ instance behind the balancer. Staging is worth having only while it stays produc
 which is why it is five instances and not a cheaper arrangement. Only staging and production get
 a deployment view: dev's shape is in the table above, and a third picture would cost a page
 without carrying a fact.
+
+A provisioned environment's hosts are prepared by `infra/deploy` — the reverse proxy, the systemd
+units that run the containers rootless under an unprivileged user, and the single configuration
+file an operator fills in — and `make deploy-check` runs over all of it on every pull request.
+[The deployment guide](docs/guides/deployment.md) has the order, the credential layout and what a
+release does. The Terraform modules that create the hosts are the piece still missing.
 
 ### Container images
 

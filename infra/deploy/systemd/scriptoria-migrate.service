@@ -1,0 +1,48 @@
+# Scriptoria — apply the schema, once per release.
+#
+# A oneshot rather than something the control plane does at startup: migrations are
+# a deployment step with a result somebody has to look at, and a container that
+# migrates on boot migrates once per process and races its siblings. The control
+# plane's own jobs expect a migrated database (`make db-migrate` is the same script
+# on a development machine — see the Makefile), and this runs it in the image the
+# release ships.
+#
+# Ordered before the control plane, and not enabled by default: a release runs
+# `systemctl start scriptoria-migrate.service` and reads its output, which is where
+# a failed migration is supposed to be noticed.
+
+[Unit]
+Description=Scriptoria schema migration
+Documentation=https://github.com/Maximilian-Maag/scriptoria
+Requires=scriptoria-postgres.service
+After=scriptoria-postgres.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=scriptoria
+Group=scriptoria
+
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Delegate=yes
+EnvironmentFile=-/etc/scriptoria/%N.env
+LoadCredential=app:/etc/scriptoria/app.env
+
+ExecStartPre=-/usr/bin/podman rm --force --ignore %N
+ExecStart=/usr/bin/podman run \
+  --rm \
+  --name %N \
+  --pull=never \
+  --network=scriptoria \
+  --env-file=%d/app.env \
+  --workdir /app/packages/db \
+  --detach=false \
+  --log-driver=journald \
+  scriptoria-backend:${IMAGE_TAG:-latest} \
+  node --import tsx src/migrate.ts
+TimeoutStartSec=300
+
+NoNewPrivileges=yes
+
+# Deliberately no [Install]: this is run by a release, not by boot.
