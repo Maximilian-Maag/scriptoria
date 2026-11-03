@@ -261,13 +261,17 @@ deploy-check-env:
 	@$(DEPLOY_DIR)/scripts/check-env.test.sh > /dev/null
 	@echo "  ...and the rules refuse what they claim to"
 
-# `systemd-analyze verify` reports a missing ExecStart binary, which is a fact about
-# the machine running the check rather than about the unit — podman is on the hosts
-# this deploys to and not on a build machine. Anything else it says is an error.
+# `systemd-analyze verify` reads the whole unit graph, so it also reports on the
+# machine it runs on — GitHub's runner has its own units with options its systemd
+# has deprecated. Only lines that name the unit being checked are ours, and the
+# only one of those that is still not an error is a missing ExecStart binary:
+# podman is on the hosts this deploys to and not on a build machine.
 deploy-check-units:
 	@fail=0; \
 	for f in $(DEPLOY_DIR)/systemd/*; do \
-	  out=$$(systemd-analyze verify "$$f" 2>&1 | grep -v 'is not executable' || true); \
+	  name=$$(basename "$$f"); stem=$${name%%.*}; stem=$${stem%%@*}; \
+	  out=$$(systemd-analyze verify "$$f" 2>&1 \
+	    | grep -F "$$stem" | grep -v 'is not executable' || true); \
 	  if [ -n "$$out" ]; then printf '%s\n' "$$out"; fail=1; fi; \
 	done; \
 	if [ $$fail -ne 0 ]; then exit 1; fi; \
