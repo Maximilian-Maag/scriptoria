@@ -85,6 +85,14 @@ Credentials come from each provider's own environment variables or credentials f
 Nothing in this repository holds one, and nothing here reads one out of a tfvars file
 that is tracked.
 
+**Every machine can reach out; only the proxy is reachable in.** Package installation on
+first boot and a script reaching its own targets (NFR-06) both need egress, and NFR-01's
+claim is about what is *reachable*. What each implementation pays for that differs — an
+internet gateway on AWS, an ephemeral external address on GCP, Azure's default outbound
+access, a public address on every NIC on STACKIT, Linode's public interface — and every
+one of them has a NAT gateway available as the tidier arrangement, for when the machines
+stop installing anything at boot.
+
 ## What is checked, and what is not
 
 `make deploy-check` runs `terraform validate` against each provider's real schema,

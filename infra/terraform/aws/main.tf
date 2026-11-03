@@ -199,6 +199,13 @@ resource "aws_instance" "this" {
   user_data                   = module.host_prep.user_data
   user_data_replace_on_change = true
 
+  # A way out as well as a way in. NFR-01's claim is about what is *reachable*, and
+  # every machine installs its packages on first boot while the script VM reaches its
+  # own targets (NFR-06). A NAT gateway would be the tidier way to keep the internal
+  # machines off the public internet and it costs more per month than this deployment's
+  # whole compute; the security groups above are what decide reachability instead.
+  associate_public_ip_address = true
+
   root_block_device {
     volume_size = 20
     volume_type = "gp3"

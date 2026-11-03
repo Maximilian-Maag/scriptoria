@@ -152,14 +152,19 @@ resource "google_compute_instance" "this" {
   network_interface {
     subnetwork = google_compute_subnetwork.main.id
 
-    # The external address, on the one role that holds it. Every other machine's
-    # interface has none at all — which is a stronger statement than a firewall
-    # rule, and the one GCP makes cheaply.
+    # A way out as well as a way in. NFR-01's claim is about what is *reachable*, and
+    # every machine installs its packages on first boot while the script VM reaches its
+    # own targets (NFR-06) — neither of which is possible without an address to leave
+    # by. The public role gets the environment's fixed address; every other machine gets
+    # an ephemeral one, and the firewall above is what decides what may reach it.
+    #
+    # Cloud NAT would be the tidier arrangement and is another component with its own
+    # cost; it is worth revisiting when the machines no longer install anything at boot.
     dynamic "access_config" {
-      for_each = each.value.public ? [1] : []
+      for_each = [1]
 
       content {
-        nat_ip = google_compute_address.public[0].address
+        nat_ip = each.value.public ? google_compute_address.public[0].address : null
       }
     }
   }

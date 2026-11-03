@@ -174,7 +174,10 @@ resource "azurerm_network_interface" "this" {
     subnet_id                     = azurerm_subnet.main.id
     private_ip_address_allocation = "Dynamic"
 
-    # The external address, on the one role that holds it.
+    # The external address, on the one role that holds it. The others still reach out:
+    # Azure gives a machine without a public address outbound access by default, which
+    # is what its first boot needs to install its packages. A NAT gateway is the
+    # supported alternative to that default and another component with its own cost.
     public_ip_address_id = each.value.public ? azurerm_public_ip.public[0].id : null
   }
 }
