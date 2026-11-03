@@ -1,0 +1,60 @@
+# Scriptoria — the directory service.
+#
+# The authoritative source for every account and every group (NFR-02 … NFR-04).
+# The platform reads it and never writes it: groups are referenced, not
+# synchronised, and there is no local account or group inventory anywhere in the
+# product. That is why this is a plain VM running OpenLDAP rather than a managed
+# identity service — NFR-02 rules out an external identity provider, which removes
+# the one place a cloud provider would have made this deployment its own.
+#
+# The LDIFs are the organisation's, not the repository's. `infra/openldap/ldifs`
+# is a fixture with four invented accounts that stands in for this on a
+# development machine; what is mounted here is whatever the directory actually is,
+# and the file is expected to differ in every environment.
+
+[Unit]
+Description=Scriptoria directory (OpenLDAP)
+Documentation=https://github.com/Maximilian-Maag/scriptoria
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=scriptoria
+Group=scriptoria
+
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Delegate=yes
+KillMode=mixed
+
+# LDAP_ROOT, LDAP_ADMIN_USERNAME, LDAP_ADMIN_PASSWORD and LDAP_CUSTOM_LDIF_DIR are
+# the container's; LDAP_URL, LDAP_BASE_DN and the bind variables beside them in the
+# same file are the apps'. They describe one directory, and check-env.sh is what
+# keeps them describing the same one.
+EnvironmentFile=-/etc/scriptoria/%N.env
+LoadCredential=app:/etc/scriptoria/app.env
+
+ExecStartPre=-/usr/bin/podman rm --force --ignore %N
+ExecStart=/usr/bin/podman run \
+  --rm \
+  --name %N \
+  --pull=never \
+  --network=scriptoria \
+  --env-file=%d/app.env \
+  --publish ${BIND_ADDRESS:-127.0.0.1}:1389:1389 \
+  --volume /var/lib/scriptoria/openldap:/bitnami/openldap:Z \
+  --volume /etc/scriptoria/ldifs:/ldifs:ro \
+  --detach=false \
+  --log-driver=journald \
+  bitnamilegacy/openldap:2.6
+ExecStop=/usr/bin/podman stop --time 30 %N
+
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

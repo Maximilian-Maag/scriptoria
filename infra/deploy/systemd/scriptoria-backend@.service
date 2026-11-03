@@ -1,0 +1,65 @@
+# Scriptoria — one control plane process.
+#
+# Templated, because the process count is what differs between environments: dev
+# runs `scriptoria-backend@1`, staging adds `@2`, production adds `@3`. They are
+# the same image and the same configuration; what changes is the port each is
+# published on, and that comes from the instance's EnvironmentFile.
+#
+# Stateless in the sense that matters: a run's terminal stream lives in Redis, not
+# in the process that opened the socket, so a client that reconnects may land on a
+# different process and resume from the last stream id it saw. That is why the
+# proxy keeps no affinity, and why replacing a process does not drop a PTY — the
+# runner holds those (see scriptoria-runner@.service).
+
+[Unit]
+Description=Scriptoria control plane (%i)
+Documentation=https://github.com/Maximilian-Maag/scriptoria
+After=network-online.target
+Wants=network-online.target
+# The control plane is useless without its two stores, and the proxy is useless
+# without the control plane: fail fast and let systemd order the restarts, rather
+# than coming up and answering 500s.
+Requires=scriptoria-postgres.service scriptoria-redis.service
+After=scriptoria-postgres.service scriptoria-redis.service
+
+[Service]
+Type=simple
+User=scriptoria
+Group=scriptoria
+
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Delegate=yes
+KillMode=mixed
+
+# HOST_PORT is this process's port; the proxy's upstream file lists one per
+# process. Nothing else reaches it — the publish is bound to loopback.
+EnvironmentFile=-/etc/scriptoria/%N.env
+LoadCredential=app:/etc/scriptoria/app.env
+
+ExecStartPre=-/usr/bin/podman rm --force --ignore %p-%i
+ExecStart=/usr/bin/podman run \
+  --rm \
+  --name %p-%i \
+  --pull=never \
+  --network=scriptoria \
+  --env-file=%d/app.env \
+  --publish 127.0.0.1:${HOST_PORT:-3001}:3001 \
+  --health-on-failure=kill \
+  --detach=false \
+  --log-driver=journald \
+  scriptoria-backend:${IMAGE_TAG:-latest}
+# SIGTERM closes the listener and the pools, and deliberately does NOT stop
+# running scripts — the PTYs belong to the runner, and a control plane restart
+# that killed them is the exact failure the runner was separated out to prevent.
+# The process gives an open terminal socket ten seconds and then exits anyway.
+ExecStop=/usr/bin/podman stop --time 30 %p-%i
+
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

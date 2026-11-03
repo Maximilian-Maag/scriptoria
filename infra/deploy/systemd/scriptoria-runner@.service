@@ -1,0 +1,73 @@
+# Scriptoria — one runner process.
+#
+# Templated like the control plane, but for a different reason: this is the only
+# process in the deployment holding SSH keys and the only one that reaches the
+# script VM, so it has its own instance — and its own release cycle — in every
+# environment (NFR-05, ADR-001). A control plane restart must not end a run, and it
+# cannot, because the PTY is here.
+#
+# It listens on no port and serves no page. That is why this unit has no publish
+# and no health check: there is nothing to publish and nothing to poll. The image
+# says so too, and the absence is deliberate rather than forgotten.
+#
+# Each process needs a distinct worker id, or two workers would claim the same run
+# and open two PTYs on one script. `RUNNER_ID` is unset here on purpose: the
+# runner derives `<hostname>:<pid>` when it is empty, which is unique by
+# construction. Set it only where the environment wants the ids to be readable in
+# the audit trail.
+
+[Unit]
+Description=Scriptoria runner (%i)
+Documentation=https://github.com/Maximilian-Maag/scriptoria
+After=network-online.target
+Wants=network-online.target
+Requires=scriptoria-postgres.service scriptoria-redis.service
+After=scriptoria-postgres.service scriptoria-redis.service
+
+[Service]
+Type=simple
+User=scriptoria
+Group=scriptoria
+
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Delegate=yes
+KillMode=mixed
+
+EnvironmentFile=-/etc/scriptoria/%N.env
+LoadCredential=app:/etc/scriptoria/app.env
+# The private key for the script VM, as a file rather than as an environment
+# variable, mounted where SSH_PRIVATE_KEY_PATH in `app.env` points. Read before
+# anything else starts: a missing key must stop the process now, not produce a run
+# that fails minutes later with "Permission denied".
+LoadCredential=ssh_key:/etc/scriptoria/ssh/id_ed25519
+# And the host key it is checked against. Verification is ON in a deployment
+# (`SSH_SKIP_HOST_KEY_VERIFICATION=false`): the fixture regenerates its host key on
+# every build, which is a development convenience and not a habit to ship.
+LoadCredential=known_hosts:/etc/scriptoria/ssh/known_hosts
+
+ExecStartPre=-/usr/bin/podman rm --force --ignore %p-%i
+ExecStart=/usr/bin/podman run \
+  --rm \
+  --name %p-%i \
+  --pull=never \
+  --network=scriptoria \
+  --env-file=%d/app.env \
+  --volume %d/ssh_key:/etc/scriptoria/ssh/id_ed25519:ro \
+  --volume %d/known_hosts:/etc/scriptoria/ssh/known_hosts:ro \
+  --detach=false \
+  --log-driver=journald \
+  scriptoria-runner:${IMAGE_TAG:-latest}
+# Long, because stopping this process means finishing the runs it holds: a
+# SIGTERM lets a run wind up rather than killing a script partway through
+# modifying hundreds of systems (ADR-003).
+ExecStop=/usr/bin/podman stop --time 120 %p-%i
+
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+TimeoutStopSec=180
+
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
