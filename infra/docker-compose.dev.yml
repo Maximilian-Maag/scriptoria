@@ -33,8 +33,14 @@ services:
     # machine tends to have more than one Postgres on it — another project's
     # stack, a system one — and taking the default means stopping that one
     # first, every time.
+    #
+    # The host port is not fixed here, because the machine that made that choice
+    # is the machine where the second project made it too. It is read back out of
+    # DATABASE_URL in .env by the Makefile: the apps are configured with a full
+    # address and compose takes a port, and this is what stops the two from
+    # disagreeing. `make ports` prints what resolved.
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Creates the test and e2e databases on a FRESH volume only. An existing
@@ -55,8 +61,9 @@ services:
     # appendonly so a restart during development does not silently drop the
     # sessions you were logged in with.
     command: ["redis-server", "--appendonly", "yes"]
+    # The host port follows REDIS_URL in .env — see the note on postgres above.
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -85,8 +92,9 @@ services:
       LDAP_ADMIN_USERNAME: admin
       LDAP_ADMIN_PASSWORD: adminpassword
       LDAP_CUSTOM_LDIF_DIR: /ldifs
+    # The host port follows LDAP_URL in .env — see the note on postgres above.
     ports:
-      - "1389:1389"
+      - "${LDAP_PORT:-1389}:1389"
     volumes:
       - ./openldap/ldifs:/ldifs:ro
     networks: [dev]
@@ -101,6 +109,11 @@ services:
   sshd:
     build: ./sshd
     container_name: scriptoria-sshd
+    # Deliberately not a variable. This is the address a seeded area maps onto
+    # (SEED_SSH_PORT) and the address four end-to-end specs assert a run
+    # recorded; a fixture that moved would have to move in all of them, and the
+    # thing it stands in for — a script VM at a fixed address — does not move
+    # either.
     ports:
       - "2222:22"
     volumes:
@@ -125,7 +138,7 @@ services:
     image: structurizr/lite:2025.11.08
     container_name: scriptoria-structurizr
     ports:
-      - "8089:8080"   # → http://localhost:8089
+      - "${STRUCTURIZR_PORT:-8089}:8080"   # → http://localhost:8089
     volumes:
       - ../docs/architecture:/usr/local/structurizr
     networks: [dev]
