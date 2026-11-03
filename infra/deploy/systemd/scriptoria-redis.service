@@ -1,0 +1,49 @@
+# Scriptoria — Redis.
+#
+# Sessions, run streams and the job queue. It is not a cache: losing it logs
+# everybody out, ends every live terminal stream and drops the queue — while the
+# runs already claimed by a worker carry on, because the PTYs are in the runner.
+# `--appendonly yes` is why a restart is survivable at all.
+#
+# Same instance and same `BIND_ADDRESS` rule as PostgreSQL (see that unit).
+
+[Unit]
+Description=Scriptoria Redis
+Documentation=https://github.com/Maximilian-Maag/scriptoria
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=scriptoria
+Group=scriptoria
+
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Delegate=yes
+KillMode=mixed
+
+EnvironmentFile=-/etc/scriptoria/%N.env
+
+ExecStartPre=-/usr/bin/podman rm --force --ignore %N
+ExecStart=/usr/bin/podman run \
+  --rm \
+  --name %N \
+  --pull=never \
+  --network=scriptoria \
+  --publish ${BIND_ADDRESS:-127.0.0.1}:6379:6379 \
+  --volume /var/lib/scriptoria/redis:/data:Z \
+  --detach=false \
+  --log-driver=journald \
+  redis:7-alpine \
+  redis-server --appendonly yes
+ExecStop=/usr/bin/podman stop --time 30 %N
+
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=60
+
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

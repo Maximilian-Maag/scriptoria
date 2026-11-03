@@ -1,0 +1,296 @@
+name: CI
+
+# Pull requests only. A push to dev, staging or main is a merge of something
+# this workflow has already passed, so running it again answers a question that
+# was answered ten seconds earlier — and the branch protections are what make
+# that true, not this file.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A second push to the same branch makes the first run's answer worthless, so
+# stop paying for it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Static analysis ──────────────────────────────────────────────────────────
+  #
+  # Both halves in one job because they share an install and each takes seconds.
+  # Splitting them would double the setup cost to parallelise ninety seconds of
+  # work, and would add a second required check to two branch protections.
+  check:
+    name: Type-check & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      # Every workspace package in parallel, which is what `make type-check`
+      # does — through the Makefile so CI and a developer's machine run the
+      # same command and cannot drift into disagreeing.
+      - name: Type-check
+        run: make type-check
+
+      - name: Lint
+        run: make lint
+
+  # ── Tests ────────────────────────────────────────────────────────────────────
+  #
+  # One leg per package, so a slow suite stops being every suite's problem and a
+  # red frontend does not hide a red runner.
+  #
+  # None of the legs here need a service: `packages/core` is pure by construction
+  # — the authorisation rules, the crontab parser and the frame codec are all
+  # written to be testable without a directory or a database anywhere near them
+  # — and the runner's suite covers its host-key and transcript handling in the
+  # same way. `packages/db`'s one suite is the drift check's regression test,
+  # which builds its own database and therefore skips here; the "Schema &
+  # migrations" job below is where it runs for real. The frontend leg still runs
+  # with `--passWithNoTests`, and is here to fail the day somebody adds a test
+  # that needs one.
+  #
+  # The backend's suite does need a database — the authorisation tests are the
+  # reason — and has its own job below.
+  test-matrix:
+    name: Test (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      # A frontend failure should not cancel the core leg: knowing about both is
+      # the point of splitting them.
+      fail-fast: false
+      matrix:
+        include:
+          - package: packages
+            command: pnpm --filter '@scriptoria/*' test
+          - package: runner
+            command: pnpm --filter runner test
+          - package: frontend
+            command: pnpm --filter frontend test
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: Test ${{ matrix.package }}
+        run: ${{ matrix.command }}
+
+  # ── Backend tests ────────────────────────────────────────────────────────────
+  #
+  # Its own job because it is the one suite that needs a service. The comment
+  # above anticipated this day: the authorisation tests are the reason, and they
+  # need a real database rather than a stubbed repository, because the bug worth
+  # catching is a `where` clause that quietly stops filtering — and a repository
+  # mocked to return the right rows proves only that the mock returned them.
+  test-backend:
+    name: Test (backend)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        # 5433 to match the dev stack's mapping, so the default connection
+        # string is the same one a developer's machine uses.
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      # The suite creates and migrates its own database, one per working
+      # directory, so there is nothing to set up here beyond the server.
+      - name: Test backend
+        run: pnpm --filter backend test
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5433/scriptoria
+
+  # The name branch protection knows. It stays green or red with the legs, so
+  # the matrix can be reshaped — a leg added, a leg split — without anybody
+  # having to edit a protection rule before it gates anything again.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: [test-matrix, test-backend]
+    if: always()
+    steps:
+      - name: Report the results
+        run: |
+          echo "test-matrix: ${{ needs.test-matrix.result }}"
+          echo "test-backend: ${{ needs.test-backend.result }}"
+          [ "${{ needs.test-matrix.result }}" = "success" ]
+          [ "${{ needs.test-backend.result }}" = "success" ]
+
+  # ── Build ────────────────────────────────────────────────────────────────────
+  #
+  # Not behind `test`: a build failure is not caused by a test failure, and
+  # learning about both at once beats learning about them in sequence.
+  #
+  # This is the job that catches what type-checking cannot. Both web tiers are
+  # Next.js applications whose route handlers are collected and compiled at
+  # build time, so a route that type-checks in isolation and fails to be built —
+  # a bad `export const dynamic`, a server/client boundary crossed by an
+  # import — is invisible until here.
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      # No environment is set, and that is a property worth keeping rather than
+      # an omission. `packages/config` validates lazily — `defineConfig` returns
+      # a getter and nothing calls it at import time — so a build needs no
+      # database URL, no directory and no secret. Verified by building with the
+      # `.env` moved aside; if a module ever starts reading configuration while
+      # it is being imported, this job goes red and says so, which is the right
+      # moment to find out rather than at the first deploy.
+      - name: Build
+        run: make build
+
+  # ── Deployment ───────────────────────────────────────────────────────────────
+  #
+  # The units, the proxy configuration, and the one file an operator fills in. None
+  # of it runs here — but every failure it catches would otherwise be met on a host
+  # as a container that will not start, with the reason three layers away.
+  # `nginx -t` and `systemd-analyze verify` are the parsers those systems use
+  # themselves, and checking the deployment's own env checker against the mistakes
+  # it names is the part that keeps it from being decoration.
+  deploy:
+    name: Deployment configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      # `terraform_wrapper: false` because the host-prep check reads `terraform
+      # output` through a redirect, and the wrapper writes its own lines into it.
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+
+      - name: The deployment layer
+        run: make deploy-check
+
+  # ── Database ─────────────────────────────────────────────────────────────────
+  #
+  # `packages/db` has no unit tests worth the name — its repositories need a
+  # database — so this is the one place on a pull request where the schema is
+  # checked against a real Postgres.
+  #
+  #   · `make db-check` asks the *migrated database* whether it has the shape
+  #     `schema.ts` declares. They are two descriptions of one thing and nothing
+  #     else compares them; they drifted once, and a database built by
+  #     `make db-migrate` could then be neither seeded nor logged into, because
+  #     the login path reads the tables that had been renamed (#24).
+  #   · `make db-check-test` is the check's own regression test: it makes the
+  #     mutations the check exists to catch and asserts each is reported, so a
+  #     check that has been weakened fails here rather than in production (#59).
+  #   · migrating and seeding an empty database is the deployment's first step
+  #     and the dev stack's second, and both have failed here before.
+  #
+  # The credentials are literals because this container is reachable from
+  # nowhere: it lives for the length of one job.
+  schema:
+    name: Schema & migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: scriptoria_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/scriptoria_ci
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: Apply the migrations to an empty database
+        run: make db-migrate
+
+      - name: The migrated database has the shape schema.ts declares
+        run: make db-check
+
+      # The check's own regression test: it makes the mutations the check exists
+      # to catch and asserts each is reported. A weakened check fails here.
+      - name: The drift check catches the drift it exists for
+        run: make db-check-test
+
+      # The bootstrap the README tells a new checkout to run, and the step that
+      # fails first when a column has been renamed.
+      - name: Seed the root group and the reference area
+        run: make db-seed
+
+  # ── Architecture model ───────────────────────────────────────────────────────
+  #
+  # docs/architecture/workspace.dsl is the source of truth for the architecture
+  # and its renders are gitignored, so nothing else would notice a model that
+  # stopped parsing. Only run when the model or its tooling changed: the
+  # renderers are pinned containers and pulling them costs more than the render.
+  diagrams:
+    name: Architecture model
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check whether the model or its tooling changed
+        id: changed
+        run: |
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" \
+               | grep -qE '^docs/architecture/workspace\.dsl$|^scripts/diagrams(Tools)?\.ts$'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: ./.github/actions/setup
+        if: steps.changed.outputs.changed == 'true'
+
+      - name: Render the C4 views
+        if: steps.changed.outputs.changed == 'true'
+        run: make diagrams-png
+
+      # Handed to the reviewer, because a diagram is the one review comment that
+      # is easier to look at than to read.
+      - name: Publish the rendered views
+        if: steps.changed.outputs.changed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: architecture-diagrams
+          path: docs/architecture/diagrams
+          retention-days: 7

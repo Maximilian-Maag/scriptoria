@@ -10,6 +10,7 @@ export {
   resolveAreaIds,
   isRoot,
   canAccessArea,
+  sameAreaSet,
   groupNameFromDn,
   type AreaEntitlement,
 } from "./authorization";
@@ -30,6 +31,7 @@ export {
   DEFAULT_CRON_TIMEZONE,
   type CronValidation,
 } from "./cron";
+export { commandRunsScript } from "./scriptReference";
 export {
   encodeTerminalFrame,
   decodeTerminalFrame,
@@ -41,6 +43,21 @@ export {
   contentTypeFor,
   isPreviewable,
   archiveFileName,
+  sanitiseFileName,
+  sanitiseArchiveEntry,
   DEFAULT_CONTENT_TYPE,
   MAX_PREVIEW_BYTES,
 } from "./resultFiles";
+export { collectionSettled } from "./collection";
+export {
+  executionCommand,
+  abortCommand,
+  cleanupCommand,
+  interpreterFor,
+  shellQuote,
+  pidFilePath,
+  PID_DIR,
+  CRONTAB_READ_COMMAND,
+  CRONTAB_WRITE_COMMAND,
+  type ExecutionCommandInput,
+} from "./execution";

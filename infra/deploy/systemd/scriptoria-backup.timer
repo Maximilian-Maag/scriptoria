@@ -1,0 +1,22 @@
+# Scriptoria — take a backup every day.
+#
+# Daily rather than hourly: the audit trail is append-only and small, and the
+# question a backup answers here is "can this platform be brought back at all",
+# not "what happened in the last hour" (that is what the log is for).
+
+[Unit]
+Description=Scriptoria database backup, daily
+Documentation=https://github.com/Maximilian-Maag/scriptoria
+
+[Timer]
+OnCalendar=daily
+
+# A host that was down at the appointed time takes its backup when it comes back,
+# rather than waiting a day for the next one.
+Persistent=true
+
+# Along with everything else at midnight, rather than exactly with it.
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  SCRIPT_DESCRIPTION_MAX_LENGTH,
+  SCRIPT_TITLE_MAX_LENGTH,
+  scriptHeaderSchema,
+} from "@scriptoria/contracts";
 import { parseScriptHeader } from "../src/header";
 
 /**
@@ -71,5 +76,76 @@ describe("parseScriptHeader", () => {
   it("ignores an outputs path that is relative or contains ..", () => {
     expect(parseScriptHeader("# scriptoria:outputs export\n")?.outputs).toBeUndefined();
     expect(parseScriptHeader("# scriptoria:outputs /opt/../etc\n")?.outputs).toBeUndefined();
+  });
+
+  /**
+   * The bug this file gained these tests for: a script whose header documents
+   * itself in prose *under* a key. Folding that prose into the key above it made
+   * `criticality` unreadable, and an unreadable criticality is the one parser
+   * failure with a safety consequence — ADR-003 gates a modifying script behind a
+   * confirmation, and `unknown` is treated as modifying.
+   */
+  it("does not fold an indented comment into a single-token key", () => {
+    const header = parseScriptHeader(
+      [
+        "# scriptoria:title        Rollout",
+        "# scriptoria:criticality  read-only",
+        "#  the nightly sweep only reads, it never writes",
+        "# scriptoria:outputs      /opt/scriptoria/export",
+      ].join("\n") + "\n",
+    );
+
+    expect(header?.criticality).toBe("read-only");
+    expect(header?.outputs).toBe("/opt/scriptoria/export");
+    expect(header?.title).toBe("Rollout");
+  });
+
+  it("still folds a continuation into a multi-line description", () => {
+    const header = parseScriptHeader(
+      [
+        "# scriptoria:title T",
+        "# scriptoria:description First line",
+        "#                        second line",
+        "# scriptoria:criticality modifying",
+      ].join("\n") + "\n",
+    );
+
+    expect(header?.description).toBe("First line second line");
+    expect(header?.criticality).toBe("modifying");
+  });
+
+  it("truncates an over-long title rather than losing the header with it", () => {
+    const header = parseScriptHeader(
+      `# scriptoria:title ${"t".repeat(250)}\n# scriptoria:criticality read-only\n`,
+    );
+
+    expect(header?.title).toHaveLength(SCRIPT_TITLE_MAX_LENGTH);
+    // The point of truncating: the declaration next to it survives.
+    expect(header?.criticality).toBe("read-only");
+  });
+
+  /**
+   * The parser's output is fed straight back into `scriptHeaderSchema` by
+   * catalogService, which answers a failed header with no header at all. So the
+   * two have to agree, and this is where they would stop agreeing.
+   */
+  it("always produces a header its own contract accepts", () => {
+    const hostile = [
+      "# scriptoria:title " + "t".repeat(300),
+      "# scriptoria:description " + "d".repeat(5_000),
+      "# scriptoria:criticality  read-only",
+      "#  a stray indented line",
+      "# scriptoria:interactive maybe",
+      "# scriptoria:outputs /opt/export",
+      "# scriptoria:owner netops@example.test",
+    ].join("\n");
+
+    const header = parseScriptHeader(`${hostile}\n`);
+    const parsed = scriptHeaderSchema.safeParse(header);
+
+    expect(parsed.success).toBe(true);
+    expect(header?.description).toHaveLength(SCRIPT_DESCRIPTION_MAX_LENGTH);
+    expect(header?.criticality).toBe("read-only");
+    expect(header?.extra).toEqual({ owner: "netops@example.test" });
   });
 });

@@ -1,15 +1,15 @@
 import type { LoginRequest, SessionUser } from "@scriptoria/contracts";
-import { isRoot, resolveAreaIds } from "@scriptoria/core";
+import { isRoot, resolveAreaIds, sameAreaSet } from "@scriptoria/core";
 import { authenticate } from "../auth/directory";
 import {
   createSession,
   destroySession,
   readSession,
+  scanSessions,
   updateSessionAreas,
   type Session,
 } from "../auth/session";
-import { listEntitlements, listRootGroups } from "../db/repositories/areaRepository";
-import * as audit from "../db/repositories/auditRepository";
+import { areaRepository, auditRepository as audit } from "@scriptoria/db";
 import { ok, type Result } from "../result";
 
 /**
@@ -47,7 +47,10 @@ export async function login(
   }
 
   const directoryUser = authenticated.value;
-  const [entitlements, rootGroups] = await Promise.all([listEntitlements(), listRootGroups()]);
+  const [entitlements, rootGroups] = await Promise.all([
+    areaRepository.listEntitlements(),
+    areaRepository.listRootGroups(),
+  ]);
 
   const areaIds = resolveAreaIds(directoryUser.groups, entitlements);
   const role = isRoot(directoryUser.groups, rootGroups) ? "root" : "administrator";
@@ -104,8 +107,41 @@ export function toSessionUser(session: Session): SessionUser {
  * what changed.
  */
 export async function refreshSessionEntitlements(session: Session): Promise<string[]> {
-  const entitlements = await listEntitlements();
+  const entitlements = await areaRepository.listEntitlements();
   const areaIds = resolveAreaIds(session.groups, entitlements);
   await updateSessionAreas(session.id, areaIds);
   return areaIds;
+}
+
+/**
+ * The same thing across every live session, and what FA-11 calls after any
+ * change to an area or its entitlements.
+ *
+ * Without this, revocation would be a promise the product does not keep: the
+ * mapping would say one thing and every session opened before the edit would
+ * go on seeing the area until its owner happened to sign in again. NFR-03 is
+ * not a statement about logins, it is a statement about what the platform is
+ * willing to show.
+ *
+ * Re-derived from the groups each session already holds, never from a fresh
+ * directory read. The groups are what the directory said at that login and
+ * stay that way until the next one (NFR-03); what changed here is the mapping.
+ *
+ * The mapping is read once for the whole sweep, so this is one query and one
+ * write per session whose area set actually moved. Sessions that are
+ * unaffected — the normal case, since most edits touch one area — are left
+ * alone rather than rewritten, which also leaves their idle window intact.
+ */
+export async function refreshAllSessionEntitlements(): Promise<number> {
+  const entitlements = await areaRepository.listEntitlements();
+  const sessions = await scanSessions();
+
+  let changed = 0;
+  for (const { id, data } of sessions) {
+    const areaIds = resolveAreaIds(data.groups, entitlements);
+    if (sameAreaSet(areaIds, data.areaIds)) continue;
+    await updateSessionAreas(id, areaIds);
+    changed += 1;
+  }
+  return changed;
 }

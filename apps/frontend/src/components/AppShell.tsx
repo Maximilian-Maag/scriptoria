@@ -1,0 +1,224 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, type ReactNode } from "react";
+import type { AreaCategory, AreaSummary } from "@scriptoria/contracts";
+import { ApiFailure, api } from "@/lib/api";
+import { useSession } from "@/lib/session";
+
+/**
+ * NFR-13's layout: a left navigation bar, and everything else to the right of
+ * it. The navigation is category, then area, then that area's scripts — which
+ * is also the order somebody thinks in when they come here to run something.
+ *
+ * FA-03.6 decides what the landing page is: deliberately empty, with the areas
+ * listed on the left. Opening one is an explicit click. That is a requirement
+ * rather than an oversight — a dashboard that guesses what you wanted is a
+ * dashboard that is wrong most of the time.
+ */
+
+const CATEGORY_LABEL: Record<AreaCategory, string> = {
+  "one-off": "One-off scripts",
+  recurring: "Recurring scripts",
+};
+
+export function AppShell({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const client = useQueryClient();
+  const session = useSession();
+  const areas = useQuery({ queryKey: ["areas"], queryFn: () => api.areas() });
+
+  const user = session.data?.user ?? null;
+  const signedOut = !session.isLoading && !user;
+
+  useEffect(() => {
+    if (signedOut) router.replace("/login");
+  }, [signedOut, router]);
+
+  // Nothing of the application is rendered while the session is unknown or
+  // gone, so there is never a frame of it visible to somebody who is not
+  // signed in — including the moment between deciding to redirect and arriving.
+  if (session.isLoading || !user) return null;
+
+  const signOut = async (): Promise<void> => {
+    await api.logout();
+    client.clear();
+    router.replace("/login");
+  };
+
+  return (
+    <div className="flex h-full">
+      <nav className="flex w-64 shrink-0 flex-col border-r border-line bg-surface">
+        <Link href="/" className="border-b border-line px-5 py-4">
+          <span className="text-sm font-semibold tracking-tight text-ink">Scriptoria</span>
+          <span className="mt-0.5 block text-[11px] text-ink-faint">
+            {user?.role === "root" ? "Root account" : "Administrator"}
+          </span>
+        </Link>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+          <AreaList
+            areas={areas.data ?? []}
+            loading={areas.isLoading}
+            error={areas.isError ? areas.error : null}
+          />
+        </div>
+
+        {/* FA-11 and FA-12. Shown only to the root account, because it is the only
+            account the administration routes will answer — a link that always
+            leads to a 403 is worse than no link. The control plane enforces
+            this independently; this is the navigation being honest, not the
+            check itself. */}
+        {user.role === "root" ? <AdminLinks /> : null}
+
+        <div className="border-t border-line px-5 py-3">
+          <p className="truncate text-xs font-medium text-ink">{user?.displayName}</p>
+          <p className="truncate text-[11px] text-ink-faint">{user?.username}</p>
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="mt-2 text-[11px] text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+          >
+            Sign out
+          </button>
+        </div>
+      </nav>
+
+      <main className="min-w-0 flex-1 overflow-hidden">{children}</main>
+    </div>
+  );
+}
+
+/**
+ * The two root-only screens: what the areas are (FA-11), and what has been done
+ * with them (FA-12). They sit together because they are one job — an entitlement
+ * granted and the record of granting it are read by the same person.
+ */
+const ADMIN_LINKS = [
+  { href: "/admin/areas", label: "Areas & entitlements" },
+  { href: "/admin/audit", label: "Audit log" },
+];
+
+function AdminLinks() {
+  const pathname = usePathname();
+
+  return (
+    <div className="space-y-0.5 border-t border-line px-3 py-3">
+      {ADMIN_LINKS.map((link) => (
+        <Link
+          key={link.href}
+          href={link.href}
+          className={`block rounded-[var(--radius-control)] px-2 py-1.5 text-[13px] ${
+            pathname.startsWith(link.href)
+              ? "bg-accent-quiet font-medium text-accent"
+              : "text-ink-muted hover:bg-surface-sunken hover:text-ink"
+          }`}
+        >
+          {link.label}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function AreaList({
+  areas,
+  loading,
+  error,
+}: {
+  areas: AreaSummary[];
+  loading: boolean;
+  error: Error | null;
+}) {
+  const pathname = usePathname();
+
+  if (loading) return <p className="px-2 text-xs text-ink-faint">Loading areas…</p>;
+
+  /**
+   * A read that failed, said as a failure (issue #57) — and what to do with
+   * whatever is still on screen.
+   *
+   * `isError` and "there is nothing to show" are two different statements, and a
+   * *refetch* is where they come apart: react-query keeps the last successful
+   * response when a refetch fails, so the links below can still be real while
+   * the read that just failed is real too. Replacing them with the panel takes
+   * away navigation the operator had a second ago; hiding the panel because
+   * links exist would put an outage back to looking like an ordinary page, which
+   * is the whole of #57. So the panel goes above what survived.
+   *
+   * The empty state below is a statement about the account's directory groups,
+   * and FA-01.4 is the requirement that says so. A failed areas call is not
+   * evidence for it: the entitlement may be perfectly correct and the control
+   * plane simply not answering. Rendering it turns an outage into "none of your
+   * groups is entitled to an area yet, ask whoever maintains the group mapping"
+   * — advice to go and repair something that is not broken, on the strength of
+   * an answer that never arrived. It is kept for a read that succeeded and came
+   * back empty.
+   */
+  const failure = error ? (
+    <div className="rounded-[var(--radius-panel)] border border-line bg-surface px-3 py-3">
+      <p className="text-xs font-medium text-ink">Could not load the areas</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
+        {error instanceof ApiFailure ? error.message : "The control plane did not answer."}
+      </p>
+    </div>
+  ) : null;
+
+  if (areas.length === 0) {
+    if (failure) return failure;
+
+    /**
+     * FA-01.4, and the one empty state in this product that must not look like
+     * a failure: an account in no entitled group authenticates perfectly well
+     * and sees nothing. There is no error here, nothing to retry, and nobody to
+     * escalate to except whoever maintains the directory groups.
+     */
+    return (
+      <div className="rounded-[var(--radius-panel)] bg-surface-sunken px-3 py-3">
+        <p className="text-xs font-medium text-ink">No areas yet</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
+          Your account is signed in, and none of its directory groups is entitled to an area yet.
+          Ask whoever maintains the group mapping to add one.
+        </p>
+      </div>
+    );
+  }
+
+  const categories = [...new Set(areas.map((area) => area.category))];
+
+  return (
+    <div className="space-y-5">
+      {failure}
+      {categories.map((category) => (
+        <section key={category}>
+          <h2 className="px-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
+            {CATEGORY_LABEL[category]}
+          </h2>
+          <ul className="mt-1.5 space-y-0.5">
+            {areas
+              .filter((area) => area.category === category)
+              .map((area) => {
+                const active = pathname === `/areas/${area.id}`;
+                return (
+                  <li key={area.id}>
+                    <Link
+                      href={`/areas/${area.id}`}
+                      className={`block truncate rounded-[var(--radius-control)] px-2 py-1.5 text-[13px] ${
+                        active
+                          ? "bg-accent-quiet font-medium text-accent"
+                          : "text-ink-muted hover:bg-surface-sunken hover:text-ink"
+                      }`}
+                    >
+                      {area.name}
+                    </Link>
+                  </li>
+                );
+              })}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}

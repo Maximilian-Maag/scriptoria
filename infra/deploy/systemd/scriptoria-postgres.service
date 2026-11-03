@@ -1,0 +1,60 @@
+# Scriptoria — PostgreSQL.
+#
+# On its own instance in staging and production ("data"), beside the control plane
+# in dev. The audit trail lives here and is the one thing in the deployment that
+# cannot be rebuilt, which is what scriptoria-backup.timer exists for.
+#
+# `BIND_ADDRESS` is what differs between environments, and it is the only place in
+# this deployment where the VPC firewall is the boundary rather than loopback: the
+# app instance is a different host, so the database has to be reachable from it,
+# and the security group is what makes that "from it" and nowhere else (NFR-01).
+# Dev sets 127.0.0.1, because there is only one host.
+
+[Unit]
+Description=Scriptoria PostgreSQL
+Documentation=https://github.com/Maximilian-Maag/scriptoria
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=scriptoria
+Group=scriptoria
+
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Delegate=yes
+KillMode=mixed
+
+# The bootstrap variables the image reads, and the connection strings the apps
+# read, are in the same file on purpose — see scripts/check-env.sh, which fails
+# when they disagree rather than letting the deployment discover it at login.
+EnvironmentFile=-/etc/scriptoria/%N.env
+LoadCredential=app:/etc/scriptoria/app.env
+
+# A restart of the database is a restart of everything that talks to it, so the
+# container is stopped with a real timeout rather than a SIGKILL: PostgreSQL
+# writes a checkpoint on SIGTERM, and a crash recovery on every deploy is a cost
+# with nothing on the other side of it.
+ExecStartPre=-/usr/bin/podman rm --force --ignore %N
+ExecStart=/usr/bin/podman run \
+  --rm \
+  --name %N \
+  --pull=never \
+  --network=scriptoria \
+  --env-file=%d/app.env \
+  --publish ${BIND_ADDRESS:-127.0.0.1}:5432:5432 \
+  --volume /var/lib/scriptoria/postgres:/var/lib/postgresql/data:Z \
+  --detach=false \
+  --log-driver=journald \
+  postgres:16-alpine
+ExecStop=/usr/bin/podman stop --time 60 %N
+
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=90
+
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

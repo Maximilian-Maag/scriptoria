@@ -1,0 +1,75 @@
+# Scriptoria — the frontend.
+#
+# One process everywhere, including production. It renders and forwards, holds no
+# credentials of its own, and is the browser's whole REST surface; the proxy in
+# front of it (see ../nginx/nginx.conf) is the only thing that reaches it.
+#
+# Rootless podman under systemd, like every container in this deployment: the unit
+# is a system unit because it starts at boot, and the container runs as an
+# unprivileged user inside it (NFR-05). Two things have to be true on the host or
+# this will not start, and both are in ../scripts/install.sh:
+#
+#   - `loginctl enable-linger scriptoria`, so the user has a runtime directory at
+#     boot rather than only while somebody is logged in;
+#   - `--pull=never`, because the images are loaded from a tarball this deployment
+#     carries (NFR-01: the network has no route out, and a pull attempt would spend
+#     its timeout failing).
+
+[Unit]
+Description=Scriptoria frontend
+Documentation=https://github.com/Maximilian-Maag/scriptoria
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=scriptoria
+Group=scriptoria
+
+# The user's runtime directory. `%U` is the uid of the User= above.
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+# podman needs to own the cgroup it creates, and stopping the unit has to reach
+# the container rather than only the podman process that started it.
+Delegate=yes
+KillMode=mixed
+
+# Instance values the deployment sets — here only the port the container is
+# published on, because the proxy and the container are on the same host and
+# nothing else may reach it.
+EnvironmentFile=-/etc/scriptoria/%N.env
+# Everything else comes from the credential store: DATABASE_URL, REDIS_URL, the
+# directory, the session settings, the runner's SSH paths. One file for the whole
+# deployment rather than one per process, because the same variables are read by
+# all of them and a second list is a second thing to keep in step.
+LoadCredential=app:/etc/scriptoria/app.env
+
+ExecStartPre=-/usr/bin/podman rm --force --ignore %N
+ExecStart=/usr/bin/podman run \
+  --rm \
+  --name %N \
+  --pull=never \
+  --network=scriptoria \
+  --env-file=%d/app.env \
+  --publish 127.0.0.1:${HOST_PORT:-3000}:3000 \
+  --health-on-failure=kill \
+  --detach=false \
+  --log-driver=journald \
+  scriptoria-frontend:${IMAGE_TAG:-latest}
+ExecStop=/usr/bin/podman stop --time 15 %N
+
+Restart=on-failure
+RestartSec=3
+# Next.js collects its routes before it serves anything, and the first start on a
+# cold host is the slow one.
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+# Deliberately not set: ProtectSystem, ProtectHome, PrivateTmp. Rootless podman
+# builds its own mount and user namespaces, and those options fight it in ways that
+# produce a unit which fails at boot on one distribution and not another. The
+# boundary that matters here is the user namespace and the VPC firewall, and both
+# are above rather than below.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

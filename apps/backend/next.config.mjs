@@ -2,12 +2,16 @@
 const config = {
   // The workspace packages ship TypeScript source rather than a build artefact,
   // so that a stale `dist` can never be what the three apps disagree over.
-  transpilePackages: ["@scriptoria/contracts", "@scriptoria/core", "@scriptoria/config"],
+  transpilePackages: [
+    "@scriptoria/contracts",
+    "@scriptoria/core",
+    "@scriptoria/config",
+    "@scriptoria/db",
+  ],
 
   // This app serves an API and a Swagger page. There is no product UI here —
   // that is the frontend's job, and the split is what keeps every privileged
   // operation on one side of a network boundary.
-  output: "standalone",
   poweredByHeader: false,
   reactStrictMode: true,
 

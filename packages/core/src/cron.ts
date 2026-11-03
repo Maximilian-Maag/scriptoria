@@ -69,9 +69,17 @@ export function nextRunAt(
  *
  * Keyed on the command rather than on the expression, because editing the
  * expression is precisely the operation that must not change the identity.
+ *
+ * `occurrence` disambiguates the case the fixture crontab actually contains: the
+ * same command scheduled twice at different times — once by hand and once inside
+ * the managed block. Command alone would give those two lines one id, and the
+ * interface would then offer to edit one line and edit the other. It is the
+ * *nth line with this command*, not the nth line overall, so adding an unrelated
+ * job above does not renumber anything; and since an edit changes neither the
+ * command nor its ordinal, identity still survives the edit.
  */
-export function scheduleId(sourceId: string, command: string): string {
-  const input = `${sourceId}::${command.trim()}`;
+export function scheduleId(sourceId: string, command: string, occurrence = 0): string {
+  const input = `${sourceId}::${command.trim()}::${occurrence}`;
   let hash = 0x811c9dc5;
   for (let i = 0; i < input.length; i++) {
     hash ^= input.charCodeAt(i);
