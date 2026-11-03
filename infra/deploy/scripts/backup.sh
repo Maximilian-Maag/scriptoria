@@ -26,20 +26,34 @@ keep="${BACKUP_KEEP:-14}"
 mkdir -p "$backup_dir"
 target="$backup_dir/scriptoria-$(date -u +%Y%m%dT%H%M%SZ).dump"
 
+# Written under a name that cannot be mistaken for a backup until it is one. A dump
+# interrupted at 3am — a full disk, a killed container, a reboot — leaves a partial
+# file, and a partial file that sorts as the newest is a restore that fails at the
+# moment somebody needs it. It is renamed only once it has been read back.
+partial="$target.partial"
+
 # Custom format, so a single table can be pulled out of it and so it is compressed
 # by default. No owner: a restore is not a claim about which roles exist.
-pg_dump --format=custom --no-owner --file="$target" "$DATABASE_URL"
+pg_dump --format=custom --no-owner --file="$partial" "$DATABASE_URL"
 
 # A dump nobody has looked at is a file, not a backup. Listing the archive proves
 # it is readable now, rather than when somebody needs it.
-pg_restore --list "$target" > /dev/null
+pg_restore --list "$partial" > /dev/null
+
+mv "$partial" "$target"
 
 echo "backup written and readable: $target"
 
+# The remains of a dump that failed. Cleared after a day: long enough that somebody
+# looking into what went wrong finds it, short enough that an outage does not fill
+# the disk with the evidence.
+find "$backup_dir" -name 'scriptoria-*.dump.partial' -mtime +1 -exec rm -f {} +
+
 # Keep the newest $keep. `ls -t` is the only ordering this image has, and the
-# directory holds nothing else.
+# directory holds nothing else. Partials are not matched: the name is what makes a
+# file a backup.
 count=0
-for f in $(ls -1t "$backup_dir"/scriptoria-*.dump 2>/dev/null || true); do
+for f in $(ls -1t "$backup_dir"/scriptoria-*.dump 2> /dev/null || true); do
   count=$((count + 1))
   if [ "$count" -gt "$keep" ]; then
     rm -f "$f"
