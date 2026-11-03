@@ -8,6 +8,7 @@ const run = (over: Partial<Run>): Run =>
   ({
     id: "00000000-0000-0000-0000-000000000000",
     status: "succeeded",
+    startedAt: new Date(NOW - 5_000).toISOString(),
     finishedAt: new Date(NOW - 1_000).toISOString(),
     resultCount: null,
     ...over,
@@ -40,6 +41,14 @@ describe("collectionSettled", () => {
   it("gives up on a collection that never reports", () => {
     const finishedAt = new Date(NOW - COLLECTION_GRACE_MS - 1).toISOString();
     expect(collectionSettled(run({ finishedAt }), NOW)).toBe(true);
+  });
+
+  it("is settled for a run that never started — there is nothing to collect", () => {
+    // A queued run stopped before a worker claimed it: `abortRun` sets
+    // `finishedAt`, but no process ran and no output directory exists. Without
+    // this, both queries poll out the whole grace period over nothing.
+    expect(collectionSettled(run({ status: "aborted", startedAt: null }), NOW)).toBe(true);
+    expect(collectionSettled(run({ status: "failed", startedAt: null }), NOW)).toBe(true);
   });
 
   it("an aborted run is collected like any other — it wrote what it wrote", () => {

@@ -112,8 +112,16 @@ export default function AdminAuditPage() {
     );
   }
 
-  const areaName = (id: string | null): string | null =>
-    id ? (areas.data?.find((area) => area.id === id)?.name ?? "Deleted area") : null;
+  const areaName = (id: string | null): string | null => {
+    if (!id) return null;
+
+    // "Deleted area" is a claim about the platform, not about this response. It
+    // is true once the list has loaded and the id is not in it — and while the
+    // list is loading, or if that query failed, every row would wear it. In an
+    // audit view an invented fact is worse than a missing one.
+    const area = areas.data?.find((entry) => entry.id === id);
+    return area?.name ?? (areas.isSuccess ? "Deleted area" : null);
+  };
 
   const set = (patch: Partial<Filters>) => {
     setFilters((current) => ({ ...current, ...patch }));

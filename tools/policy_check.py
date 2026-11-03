@@ -255,46 +255,59 @@ def check_shell_style(repo: Path, files: list[str], cfg: dict, rep: Report) -> N
         rep.ok("shell/use-(( ))-for-numbers")
 
 
-def _batch_env(paths: list[str]) -> dict:
-    env = dict(os.environ)
-    env["POLICY_FILES"] = json.dumps(paths)
-    return env
+def _batch_run(cmd: list[str], payload: str) -> list[str] | None:
+    """Run a batch checker, handing it its work on stdin.
+
+    Not through an environment variable: a large `--all` run puts more paths in
+    one than Linux allows in a single `environ` entry (E2BIG), and that failure
+    is an uncaught `OSError` rather than a verdict.
+
+    `None` means the helper produced no verdict at all — it crashed, or the
+    interpreter it needs is missing. That is not the same as "nothing wrong", and
+    the caller reports it as a failure rather than as a pass.
+    """
+    try:
+        out = subprocess.run(cmd, input=payload, capture_output=True, text=True)
+    except OSError:
+        return None
+    if out.returncode:
+        return None
+    try:
+        return json.loads(out.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
 
 
-def _compile_python(paths: list[str]) -> list[str]:
+def _compile_python(paths: list[str]) -> list[str] | None:
     """Compile many files in ONE interpreter start (a hook cannot afford one per file)."""
     if not paths:
         return []
-    code = ("import json, os, pathlib, sys\n"
+    code = ("import json, pathlib, sys\n"
             "bad = []\n"
-            "for p in json.loads(os.environ['POLICY_FILES']):\n"
+            "for p in json.load(sys.stdin):\n"
             "    try:\n"
             "        compile(pathlib.Path(p).read_text(errors='replace'), p, 'exec')\n"
             "    except (SyntaxError, ValueError) as exc:\n"
             "        bad.append('%s: %s' % (p, exc))\n"
             "print(json.dumps(bad))\n")
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                         env=_batch_env(paths))
-    try:
-        return json.loads(out.stdout.strip().splitlines()[-1])
-    except (ValueError, IndexError):
+    return _batch_run([sys.executable, "-c", code], json.dumps(paths))
+
+
+def _check_js(paths: list[str]) -> list[str] | None:
+    if not paths:
         return []
-
-
-def _check_js(paths: list[str]) -> list[str]:
-    if not paths or not shutil.which("node"):
+    if not shutil.which("node"):
+        # A deliberate skip, and the only one: there is no JavaScript engine to
+        # ask. A node that is present and fails is a different thing — see above.
         return []
     script = ("const fs=require('fs'),vm=require('vm'),out=[];"
-              "for (const f of JSON.parse(process.env.POLICY_FILES)){"
+              "let src='';"
+              "process.stdin.on('data',(d)=>{src+=d}).on('end',()=>{"
+              "for (const f of JSON.parse(src)){"
               "try{new vm.Script(fs.readFileSync(f,'utf8'),{filename:f});}"
               "catch(e){out.push(f)}}"
-              "process.stdout.write(JSON.stringify(out));")
-    out = subprocess.run(["node", "-e", script], capture_output=True, text=True,
-                         env=_batch_env(paths))
-    try:
-        return json.loads(out.stdout.strip() or "[]")
-    except ValueError:
-        return []
+              "process.stdout.write(JSON.stringify(out));});")
+    return _batch_run(["node", "-e", script], json.dumps(paths))
 
 
 def check_syntax(repo: Path, files: list[str], cfg: dict, rep: Report) -> None:
@@ -332,7 +345,12 @@ def check_syntax(repo: Path, files: list[str], cfg: dict, rep: Report) -> None:
               if subprocess.run(["bash", "-n", f], capture_output=True).returncode]
     for rule, bad in (("syntax/json-parses", bad_json), ("syntax/python-compiles", bad_py),
                       ("syntax/js-parses", bad_js), ("syntax/shell-parses", bad_sh)):
-        if bad:
+        if bad is None:
+            # The batch helper never produced a verdict. `scope/files-found` makes
+            # the same point in the other direction: a check that did not run must
+            # not be reported as a check that passed.
+            rep.fail(rule, "the batch check produced no verdict — it crashed or is unavailable")
+        elif bad:
             rep.fail(rule, sample([b.replace(str(repo) + "/", "") for b in bad]))
         else:
             rep.ok(rule)
@@ -350,13 +368,14 @@ def check_hygiene(repo: Path, files: list[str], cfg: dict, rep: Report) -> None:
             modes[parts[3]] = parts[0]
     selected = set(files)
 
-    symlinks = [f for f in files if modes.get(f) == "120000" and f not in allow.get("symlinks", {})]
+    symlinks = [f for f in files
+                if modes.get(f) == "120000" and not allowed(allow.get("symlinks", {}), f)]
     if symlinks:
         rep.fail("hygiene/no-symlinks", sample(symlinks))
     else:
         rep.ok("hygiene/no-symlinks")
 
-    junk = [f for f in files if JUNK.search(f) and f not in allow.get("artifacts", {})]
+    junk = [f for f in files if JUNK.search(f) and not allowed(allow.get("artifacts", {}), f)]
     if junk:
         rep.fail("hygiene/no-build-artifacts", sample(junk))
     else:
@@ -432,7 +451,7 @@ def check_version_bumped(repo: Path, files: list[str], cfg: dict, rep: Report,
     """A plugin change should bump manifest.json + CHANGELOG together (warn-only)."""
     if not cfg.get("plugin") or not changed:
         return
-    staged = git("diff", "--cached", "--name-only")
+    staged = git("diff", "--cached", "--name-only", "-z")
     if not staged:
         return
     code = [f for f in staged if f not in ("manifest.json", "CHANGELOG.md", "README.md")
@@ -530,7 +549,16 @@ def main() -> int:
 
     import fnmatch
     files = [f for f in files if not any(fnmatch.fnmatch(f, pat) for pat in ignore)]
-    files = [f for f in files if (repo / f).exists()]
+    # `os.path.lexists`, not `Path.exists`: the latter follows the link, so a
+    # dangling symlink is dropped here and `hygiene/no-symlinks` never sees the
+    # one shape of symlink that is certainly not meant to be there.
+    files = [f for f in files if os.path.lexists(repo / f)]
+    if not files and not noop and mode != "all":
+        # A diff that leaves nothing to check — every path ignored, or gone from
+        # the working tree — is a no-op, not a failure. `--all` over an empty tree
+        # *is* one, and is reported below.
+        noop = True
+        rep.ok("scope/nothing-to-check", "every changed file is ignored or gone")
     if not files and not noop:
         # Never report a green run over nothing: if nothing could be read, say so.
         rep.fail("scope/files-found",

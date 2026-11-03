@@ -28,7 +28,22 @@ const suffix = createHash("sha1").update(process.cwd()).digest("hex").slice(0, 8
 export const TEST_DATABASE = `scriptoria_test_${suffix}`;
 
 const base = process.env["DATABASE_URL"] ?? DEFAULT_URL;
-const urlFor = (name: string): string => base.replace(/\/[^/?]+(\?|$)/, `/${name}$1`);
+
+/**
+ * The same cluster and credentials, a different database name.
+ *
+ * Parsed rather than pattern-matched, because the two shapes a pattern gets
+ * wrong are ordinary ones: a URL that ends in `/`, and one that carries no path
+ * at all. Neither is an error, and the fallback for a URL a pattern does not
+ * match is not a safe one — it is *this* database, the one the process is
+ * configured against, so the suite would migrate and `truncate` the database an
+ * operator is looking at. `new URL` names every case correctly, query included.
+ */
+const urlFor = (name: string): string => {
+  const url = new URL(base);
+  url.pathname = `/${name}`;
+  return url.toString();
+};
 
 export const TEST_DATABASE_URL = urlFor(TEST_DATABASE);
 

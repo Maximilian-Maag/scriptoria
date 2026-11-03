@@ -47,6 +47,12 @@ COPY --chown=node:node tsconfig.base.json tsconfig.json ./
 COPY --chown=node:node packages packages
 COPY --chown=node:node apps/runner apps/runner
 
+# BuildKit runs only the stages the target depends on, and nothing here depended
+# on `build` — so its `tsc --noEmit` never ran, and an image could be built from
+# a runner that does not compile. This is that dependency: the same manifest the
+# context already provided, taken from the stage that type-checks it.
+COPY --from=build --chown=node:node /app/apps/runner/package.json apps/runner/package.json
+
 USER node
 
 # No EXPOSE and no HEALTHCHECK, by design. This process accepts no connection —

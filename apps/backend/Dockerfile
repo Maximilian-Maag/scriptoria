@@ -80,8 +80,12 @@ EXPOSE 3001
 
 # The same endpoint the monitoring system polls (NFR-16). `wget` is in busybox;
 # adding curl for a nicer flag would be adding a package for nothing.
+#
+# The port is the one the server itself listens on: the image sets a default and
+# a deployment may set another, and a check that knocked on 3001 while the
+# process listened elsewhere would call a healthy container unhealthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:3001/api/health || exit 1
+  CMD wget -q -O /dev/null "http://127.0.0.1:${BACKEND_PORT:-3001}/api/health" || exit 1
 
 WORKDIR /app/apps/backend
 CMD ["node", "--import", "tsx", "server.ts"]

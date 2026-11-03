@@ -63,8 +63,11 @@ EXPOSE 3000
 # There is no health route here, and adding one would be adding an endpoint for
 # the monitor rather than for the product. The login page is served by the same
 # process and is a truer check: if it renders, the tier is doing its job.
+#
+# On the port the process itself listens on, for the reason the control plane's
+# check gives.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:3000/login || exit 1
+  CMD wget -q -O /dev/null "http://127.0.0.1:${FRONTEND_PORT:-3000}/login" || exit 1
 
 WORKDIR /app/apps/frontend
 CMD ["node", "--import", "tsx", "server.ts"]

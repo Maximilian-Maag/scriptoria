@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# The default token is read/write on a repository setting nobody here chose. The
+# job clones and runs a checker over the files it already has; it publishes
+# nothing, so it needs nothing.
+permissions:
+  contents: read
+
 jobs:
   policy:
     runs-on: ubuntu-latest
@@ -11,5 +17,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0          # the checker ratchets against the base branch
+          # `fetch-depth: 0` already leaves every ref the ratchet compares
+          # against, and a token written into `.git/config` survives for the
+          # rest of the job for no reason.
+          persist-credentials: false
       - name: Policy as code
         run: python3 tools/policy_check.py --ci
