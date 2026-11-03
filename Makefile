@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-down dev-logs ports run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner deploy-images deploy-check deploy-check-shell deploy-check-env deploy-check-units deploy-check-nginx deploy-check-terraform diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
+.PHONY: help install dev dev-down dev-logs ports run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner deploy-images deploy-check deploy-check-shell deploy-check-env deploy-check-tests deploy-check-units deploy-check-nginx deploy-check-terraform diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
 
 # pnpm is installed via the standalone script — add its bin dir to PATH so make can find it
 PNPM_HOME ?= $(HOME)/.local/share/pnpm
@@ -247,18 +247,23 @@ RUNTIME ?= docker
 NGINX_IMAGE ?= nginx:1.27-alpine
 TERRAFORM ?= terraform
 
-deploy-check: deploy-check-shell deploy-check-env deploy-check-units deploy-check-nginx deploy-check-terraform
+deploy-check: deploy-check-shell deploy-check-env deploy-check-tests deploy-check-units deploy-check-nginx deploy-check-terraform
 
 deploy-check-shell:
 	@for f in $(DEPLOY_DIR)/scripts/*.sh $(TF_DIR)/checks/*.sh; do sh -n $$f || exit 1; done
 	@echo "  deployment scripts parse"
 
-# The example is the deployment's configuration file with placeholders in it, so it
-# is checked like one — and the checker is checked against the mistakes it claims
-# to catch.
+# The example is the deployment's configuration file with placeholders in it, so it is
+# checked like one.
 deploy-check-env:
 	@$(DEPLOY_DIR)/scripts/check-env.sh > /dev/null && echo "  app.env.example satisfies the deployment's rules"
-	@$(DEPLOY_DIR)/scripts/check-env.test.sh > /dev/null && echo "  ...and the rules refuse what they claim to"
+
+# The scripts that do something irreversible, tested against their own failure modes —
+# with stubs where the real tool would want a database. A checker and a backup script that
+# nothing has ever watched fail are two files that might do anything.
+deploy-check-tests:
+	@$(DEPLOY_DIR)/scripts/check-env.test.sh > /dev/null && echo "  the env rules refuse what they claim to"
+	@$(DEPLOY_DIR)/scripts/backup.test.sh > /dev/null && echo "  a dump becomes a backup only once it is readable, and retention keeps what it says"
 
 # `systemd-analyze verify` reads the whole unit graph, so it also reports on the
 # machine it runs on — GitHub's runner has its own units with options its systemd
@@ -275,6 +280,7 @@ deploy-check-units:
 	done; \
 	if [ $$fail -ne 0 ]; then exit 1; fi; \
 	echo "  systemd units are valid"
+	@$(DEPLOY_DIR)/scripts/check-units.sh
 
 # A throwaway certificate, because `nginx -t` loads the pair the configuration
 # names and would otherwise fail on the one file that is an operator's to place.
