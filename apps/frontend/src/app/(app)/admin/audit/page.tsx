@@ -115,12 +115,12 @@ export default function AdminAuditPage() {
   const areaName = (id: string | null): string | null => {
     if (!id) return null;
 
-    // "Deleted area" is a claim about the platform, not about this response. It
-    // is true once the list has loaded and the id is not in it — and while the
-    // list is loading, or if that query failed, every row would wear it. In an
-    // audit view an invented fact is worse than a missing one.
-    const area = areas.data?.find((entry) => entry.id === id);
-    return area?.name ?? (areas.isSuccess ? "Deleted area" : null);
+    // No "Deleted area", deliberately. Deleting an area sets the audit row's
+    // `area_id` to null (`onDelete: "set null"`), which is the branch above —
+    // so a non-null id that is not in this list is never a deletion. It is a
+    // list this view has not caught up with, and naming it would be inventing
+    // the one fact an audit view must not invent.
+    return areas.data?.find((entry) => entry.id === id)?.name ?? null;
   };
 
   const set = (patch: Partial<Filters>) => {

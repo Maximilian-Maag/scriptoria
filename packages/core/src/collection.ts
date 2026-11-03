@@ -26,12 +26,6 @@ export function collectionSettled(run: Run, now: number = Date.now()): boolean {
   // no output directory to list and nothing will ever arrive.
   if (!run.finishedAt) return true;
 
-  // And neither has a run that never started: a queued run stopped before a
-  // worker claimed it has no output directory either, and waiting out the grace
-  // period for a collection that cannot happen keeps two queries polling for a
-  // minute over a run that is already over.
-  if (!run.startedAt) return true;
-
   // And the bound for the run whose collection failed rather than finished:
   // `resultCount` stays null in that case, and polling forever for an answer
   // that is not coming is how a closed tab becomes the only cure.
