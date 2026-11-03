@@ -56,6 +56,14 @@ yarn-error.log*
 /infra/sshd/keys/
 /infra/sshd/authorized_keys
 
+# terraform — provider plugins and state. The state is the deployment's, not the
+# repository's: it lives in the backend the operator configures at init, and
+# anything a local run leaves behind is a working file.
+infra/terraform/**/.terraform/
+infra/terraform/**/*.tfstate
+infra/terraform/**/*.tfstate.*
+infra/terraform/checks/host_prep/host.yaml
+
 # structurizr lite working files — it writes workspace.json next to the DSL as
 # its own cache. workspace.dsl is the source of truth; a checked-in render of it
 # is a render that will disagree with it.

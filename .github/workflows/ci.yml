@@ -183,6 +183,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # `terraform_wrapper: false` because the host-prep check reads `terraform
+      # output` through a redirect, and the wrapper writes its own lines into it.
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+
       - name: The deployment layer
         run: make deploy-check
 

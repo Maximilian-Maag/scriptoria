@@ -252,9 +252,9 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
         # abandons.
 
         deploymentEnvironment "Dev" {
-            deploymentNode "Linode" "One region, one VPC." "Linode" {
-                deploymentNode "VPC scriptoria-dev" "Private. The proxy holds the only public address; everything else is reachable only from inside it (NFR-01)." "Linode VPC / Firewall" {
-                    deploymentNode "scriptoria" "One VM for the platform: proxy, frontend and control plane, with the stores and the directory beside them. Everything that is separate in production, together." "Linode Instance / rootless containers" {
+            deploymentNode "The chosen provider" "One region, one private network." "Any of the five: linode, aws, gcp, azure, stackit" {
+                deploymentNode "VPC scriptoria-dev" "Private. The proxy holds the only public address; everything else is reachable only from inside it (NFR-01)." "VPC / firewall" {
+                    deploymentNode "scriptoria" "One VM for the platform: proxy, frontend and control plane, with the stores and the directory beside them. Everything that is separate in production, together." "Instance / rootless containers" {
                         deploymentNode "reverse proxy" "TLS termination and the routing split between the frontend and the control plane." "systemd / nginx" {
                         }
                         deploymentNode "frontend" "Standalone build; the target machine never runs an install." "Node" {
@@ -273,12 +273,12 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
                             softwareSystemInstance directory
                         }
                     }
-                    deploymentNode "runner" "Its own VM even here, because it is the only thing holding SSH keys and the only thing that reaches the script VM. Collapsing it into the platform VM would make dev the one environment where that boundary does not exist." "Linode Instance / rootless containers" {
+                    deploymentNode "runner" "Its own VM even here, because it is the only thing holding SSH keys and the only thing that reaches the script VM. Collapsing it into the platform VM would make dev the one environment where that boundary does not exist." "Instance / rootless containers" {
                         deploymentNode "runner" "One process, so O-7's concurrency question stays untested here." "Node · 1 process" {
                             containerInstance runner
                         }
                     }
-                    deploymentNode "script" "Provisioned, then left alone. The platform installs nothing here (NFR-07)." "Linode Instance" {
+                    deploymentNode "script" "Provisioned, then left alone. The platform installs nothing here (NFR-07)." "Instance" {
                         softwareSystemInstance script_vm
                     }
                 }
@@ -286,9 +286,9 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
         }
 
         deploymentEnvironment "Staging" {
-            deploymentNode "Linode" "Same region and module versions as production." "Linode" {
-                deploymentNode "VPC scriptoria-staging" "Private. The proxy holds the only public address; everything else is reachable only from inside it (NFR-01)." "Linode VPC / Firewall" {
-                    deploymentNode "app" "" "Linode Instance / rootless containers" {
+            deploymentNode "The chosen provider" "Same region and implementation versions as production." "Any of the five: linode, aws, gcp, azure, stackit" {
+                deploymentNode "VPC scriptoria-staging" "Private. The proxy holds the only public address; everything else is reachable only from inside it (NFR-01)." "VPC / firewall" {
+                    deploymentNode "app" "" "Instance / rootless containers" {
                         deploymentNode "reverse proxy" "TLS termination and the routing split between the frontend and the control plane. The terminal WebSocket goes straight through to the backend." "systemd / nginx" {
                         }
                         deploymentNode "frontend" "Standalone build; the target machine never runs an install." "Node" {
@@ -298,12 +298,12 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
                             containerInstance backend
                         }
                     }
-                    deploymentNode "runner" "Its own instance. It is the only thing holding SSH keys and the only thing that reaches the script VM, so the boundary sits where the credentials are rather than around a frontend that holds none." "Linode Instance / rootless containers" {
+                    deploymentNode "runner" "Its own instance. It is the only thing holding SSH keys and the only thing that reaches the script VM, so the boundary sits where the credentials are rather than around a frontend that holds none." "Instance / rootless containers" {
                         deploymentNode "runner" "Holds the SSH keys and the PTYs. Its own release cycle." "Node · 2 processes" 2 {
                             containerInstance runner
                         }
                     }
-                    deploymentNode "data" "" "Linode Instance" {
+                    deploymentNode "data" "" "Instance" {
                         deploymentNode "postgres" "" "PostgreSQL" {
                             containerInstance database
                         }
@@ -311,10 +311,10 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
                             containerInstance broker
                         }
                     }
-                    deploymentNode "script" "A real script VM with real scripts on it — the one thing the fixture cannot stand in for (O-6)." "Linode Instance" {
+                    deploymentNode "script" "A real script VM with real scripts on it — the one thing the fixture cannot stand in for (O-6)." "Instance" {
                         softwareSystemInstance script_vm
                     }
-                    deploymentNode "ldap" "" "Linode Instance / OpenLDAP" {
+                    deploymentNode "ldap" "" "Instance / OpenLDAP" {
                         softwareSystemInstance directory
                     }
                 }
@@ -328,9 +328,9 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
         }
 
         deploymentEnvironment "Production" {
-            deploymentNode "Linode" "" "Linode" {
-                deploymentNode "VPC scriptoria-prod" "Private. The proxy holds the only public address; everything else is reachable only from inside it (NFR-01)." "Linode VPC / Firewall" {
-                    deploymentNode "app" "" "Linode Instance / rootless containers" {
+            deploymentNode "The chosen provider" "" "Any of the five: linode, aws, gcp, azure, stackit" {
+                deploymentNode "VPC scriptoria-prod" "Private. The proxy holds the only public address; everything else is reachable only from inside it (NFR-01)." "VPC / firewall" {
+                    deploymentNode "app" "" "Instance / rootless containers" {
                         deploymentNode "reverse proxy" "TLS termination and the routing split between the frontend and the control plane. The terminal WebSocket goes straight through to the backend." "systemd / nginx" {
                         }
                         deploymentNode "frontend" "Standalone build; the target machine never runs an install." "Node" {
@@ -340,12 +340,12 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
                             containerInstance backend
                         }
                     }
-                    deploymentNode "runner" "Its own instance. It is the only thing holding SSH keys and the only thing that reaches the script VM, so the boundary sits where the credentials are rather than around a frontend that holds none." "Linode Instance / rootless containers" {
+                    deploymentNode "runner" "Its own instance. It is the only thing holding SSH keys and the only thing that reaches the script VM, so the boundary sits where the credentials are rather than around a frontend that holds none." "Instance / rootless containers" {
                         deploymentNode "runner" "Holds the SSH keys and the PTYs. Its own release cycle." "Node · 2 processes" 2 {
                             containerInstance runner
                         }
                     }
-                    deploymentNode "data" "Backed up. The audit trail lives here and is the one thing that cannot be rebuilt." "Linode Instance" {
+                    deploymentNode "data" "Backed up. The audit trail lives here and is the one thing that cannot be rebuilt." "Instance" {
                         deploymentNode "postgres" "" "PostgreSQL" {
                             containerInstance database
                         }
@@ -353,10 +353,10 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
                             containerInstance broker
                         }
                     }
-                    deploymentNode "script" "One instance is the normal case; more are possible (NFR-07). Nothing is installed here and no port is opened to the internet." "Linode Instance" {
+                    deploymentNode "script" "One instance is the normal case; more are possible (NFR-07). Nothing is installed here and no port is opened to the internet." "Instance" {
                         softwareSystemInstance script_vm
                     }
-                    deploymentNode "ldap" "Authoritative for every account and group (NFR-03, NFR-04)." "Linode Instance / OpenLDAP" {
+                    deploymentNode "ldap" "Authoritative for every account and group (NFR-03, NFR-04)." "Instance / OpenLDAP" {
                         softwareSystemInstance directory
                     }
                 }
@@ -374,29 +374,35 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
         # module implementations satisfy, drawn once so the portability claim can
         # be checked rather than asserted.
         #
-        # Only the Linode implementation is deployed. The other three exist so the
-        # interface stays honest: an interface with one implementation is just the
-        # implementation with extra steps, and the first real port is where you
-        # find out which assumptions were Linode's rather than the platform's.
+        # Five implementations and no chosen provider: the platform names none, so
+        # the environments are drawn with the provider left to whoever has an
+        # account. Both extremes are wrong here — naming one would bake it into the
+        # documentation the code is held to, and drawing five would be five pictures
+        # of the same three machines.
+        #
+        # The five exist so the interface stays honest: an interface with one
+        # implementation is just the implementation with extra steps, and the first
+        # real port is where you find out which assumptions were a provider's rather
+        # than the platform's.
         deploymentEnvironment "Portability" {
-            deploymentNode "modules/network" "One private network per environment, with the public address as the only way in." "linode VPC+Firewall · aws VPC+SG · azure VNet+NSG · gcp VPC+Firewall" {
-                deploymentNode "modules/edge" "The public address and TLS. Holds no application — everything it fronts runs in modules/app." "linode NodeBalancer · aws ALB · azure AppGateway · gcp HTTPS-LB" {
+            deploymentNode "modules/network" "One private network per environment, with the public address as the only way in." "linode VPC+Firewall · aws VPC+SG · azure VNet+NSG · gcp VPC+Firewall · stackit network+SG" {
+                deploymentNode "modules/edge" "The public address and TLS. Holds no application — everything it fronts runs in modules/app, and at these sizes the app instance holds the address itself. A managed balancer per provider is the most provider-specific piece there is, and it earns its place when there is more than one app instance to put behind it." "the public address on the app instance — no managed balancer at these sizes" {
                 }
-                deploymentNode "modules/app" "The proxy, the frontend and the control plane on one instance. The module whose process counts differ between environments." "linode Instance · aws EC2+ASG · azure VMSS · gcp MIG" {
+                deploymentNode "modules/app" "The proxy, the frontend and the control plane on one instance. The module whose process counts differ between environments." "an instance running rootless containers, any of the five" {
                     containerInstance frontend
                     containerInstance backend
                 }
-                deploymentNode "modules/runner" "Its own instance everywhere, because it is the only module that holds SSH keys and the only one that reaches the script VM." "linode Instance · aws EC2+ASG · azure VMSS · gcp MIG" {
+                deploymentNode "modules/runner" "Its own instance everywhere, because it is the only module that holds SSH keys and the only one that reaches the script VM." "an instance running rootless containers, any of the five" {
                     containerInstance runner
                 }
-                deploymentNode "modules/data" "Where the portability claim is thinnest: every provider has managed Postgres and Redis, and no two agree on how to configure them." "linode ManagedDB · aws RDS+ElastiCache · azure FlexServer+Cache · gcp CloudSQL+Memorystore" {
+                deploymentNode "modules/data" "PostgreSQL and Redis as the same containers everywhere, rather than as each provider's managed store. Five managed stores would be five integrations that nothing in this repository could verify, and the platform's own backup and restore covers what a managed one would have been bought for." "PostgreSQL and Redis in containers on the data instance — no managed store" {
                     containerInstance database
                     containerInstance broker
                 }
-                deploymentNode "modules/script" "The one node no provider abstraction helps with, and the one that needs none. The platform installs nothing here (NFR-07)." "a plain Linux VM, identical on all four" {
+                deploymentNode "modules/script" "The one node no provider abstraction helps with, and the one that needs none. The platform installs nothing here (NFR-07)." "a plain Linux VM, identical on all five" {
                     softwareSystemInstance script_vm
                 }
-                deploymentNode "modules/directory" "Deliberately not a managed identity service: NFR-02 rules out an external identity provider, which removes the one place each cloud would differ most." "a plain VM running OpenLDAP, all four" {
+                deploymentNode "modules/directory" "Deliberately not a managed identity service: NFR-02 rules out an external identity provider, which removes the one place each cloud would differ most." "a plain VM running OpenLDAP, all five" {
                     softwareSystemInstance directory
                 }
             }
@@ -485,7 +491,7 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
         deployment scriptoria "Portability" "Deployment_Portability" {
             include *
             autoLayout tb 400 400
-            description "The contract each provider implementation satisfies, not an environment anybody deploys. Only the Linode implementation runs; the other three keep the interface honest, since an interface with one implementation is the implementation with extra steps."
+            description "The contract each provider implementation satisfies, not an environment anybody deploys. Five implementations behind it, none of them chosen: the interface stays honest because an interface with one implementation is the implementation with extra steps."
         }
 
         styles {

@@ -30,6 +30,33 @@ control plane: it renders and forwards, holds no credentials of its own, and spl
 the same VPC behind the same proxy would buy a boundary nothing enforces while putting a cross-host
 hop on every call the API proxy makes.
 
+## Creating the machines
+
+`infra/terraform` makes the machines exist. Five implementations — Linode, AWS, GCP, Azure, STACKIT
+— behind one interface, because the runtime above them is the same everywhere: Linux, systemd,
+rootless podman, nginx. The provider only decides how machines are created and how reachability is
+expressed, and everything below applies identically whoever it was.
+
+```sh
+cd infra/terraform/<provider>
+terraform init -backend-config=bucket=... -backend-config=key=<env>.tfstate -reconfigure
+terraform apply -var-file=../environments/<env>.tfvars -var-file=~/scriptoria-<env>.tfvars
+```
+
+`<env>.tfvars` is the shape — which roles, how many, how big (`dev` is three machines, `staging` and
+`prod` are five). The operator's own file carries the two things the repository deliberately does not:
+their SSH public key, and who may reach SSH. The apply prints `instances`, every machine by role with
+the address another machine in the environment reaches it on, and `public_address`, which is what the
+environment's DNS record points at.
+
+Point DNS at it, then prepare each host as above — with those addresses the answer to "what goes in
+`app.env`" stops being a question. [The hosts](../../infra/terraform/README.md) has the contract, the
+per-provider differences and what an apply cannot be trusted to have proved.
+
+No provider is named anywhere in the platform. That is a decision rather than a preference: naming
+one would put it in the architecture model, the README and every runbook, and the first environment
+that had to be built somewhere else would arrive as a rewrite.
+
 ## One host, before anything
 
     sudo infra/deploy/scripts/install.sh
@@ -150,13 +177,19 @@ with the tools they already have. It is the only part of this that cannot be aut
 
 ## What is checked, and where
 
-`make deploy-check` runs four things, and CI runs them on every pull request in the "Deployment
+`make deploy-check` runs five things, and CI runs them on every pull request in the "Deployment
 configuration" job:
 
 - the scripts parse;
 - `app.env.example` satisfies the deployment's rules, and the rules refuse what they claim to;
 - every unit passes `systemd-analyze verify` (a missing `podman` binary is a fact about the machine
   running the check, not about the unit, and is filtered);
-- `nginx -t` accepts the proxy configuration — the same parser the proxy itself runs.
+- `nginx -t` accepts the proxy configuration — the same parser the proxy itself runs;
+- each of the five Terraform implementations validates against its provider's real schema, the five
+  still declare the same contract, and the cloud-init document renders with every file of this
+  deployment layer in it.
 
-None of it proves an environment comes up. That needs hosts, and hosts need the Terraform modules.
+None of it proves an environment comes up. It cannot: the first four are checks on files, and the
+fifth is as far as Terraform can go without an account — a machine type that does not exist in a
+region, a quota, a missing permission or a wrong subnet would be found by an apply and by nothing
+here.

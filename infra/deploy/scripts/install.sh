@@ -29,6 +29,22 @@ if ! getent passwd "$user" > /dev/null; then
     echo "created user $user"
 fi
 
+# Rootless podman runs the containers as this user inside a subordinate id range,
+# and `useradd --system` does not allocate one — a human's account gets a range
+# from login.defs; a system account does not. Without this, the first `podman run`
+# fails with "no subuid ranges for user", which reads as a podman problem rather
+# than as an account created by a different rule. Take the first free range.
+if ! grep -q "^$user:" /etc/subuid 2> /dev/null || ! grep -q "^$user:" /etc/subgid 2> /dev/null; then
+    start=100000
+    while grep -q ":$start:" /etc/subuid /etc/subgid 2> /dev/null; do
+        start=$((start + 65536))
+    done
+    for file in /etc/subuid /etc/subgid; do
+        grep -q "^$user:" "$file" 2> /dev/null || printf '%s:%s:65536\n' "$user" "$start" >> "$file"
+    done
+    echo "allocated subordinate ids $start-$((start + 65535)) to $user"
+fi
+
 # Rootless podman from a *system* unit needs the user's runtime directory to exist
 # at boot, and without lingering it exists only while somebody is logged in — which
 # on a server is never. This one line is the difference between a stack that comes

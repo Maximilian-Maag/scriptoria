@@ -81,7 +81,7 @@ What a provisioned environment is made of: [`docs/guides/deployment.md`](docs/gu
 | Sessions, streams, job queue | Redis 7 |
 | Directory | LDAP / LDAPS (`ldapts`) |
 | Package manager | pnpm workspaces |
-| Deployment | Terraform per environment — rootless containers under systemd on Linode, behind a reverse proxy with TLS |
+| Deployment | Terraform per environment — rootless containers under systemd behind a reverse proxy with TLS. Five provider implementations behind one interface; no provider is baked into the platform. |
 
 Both web tiers are Next.js, as NFR-11 requires; [ADR-002](docs/architecture/adr/002-one-typescript-monorepo.md)
 argues that against the obvious split-stack alternative and states what it costs. The terminal
@@ -186,7 +186,7 @@ scriptoria/
 │   ├── sshd/                   # The stand-in script VM: reference scripts, output dir, crontab
 │   ├── openldap/               # Seeded test accounts and groups
 │   ├── deploy/                 # The reverse proxy, the systemd units, the deployment's configuration
-│   └── terraform/              # (planned) dev, staging and prod from shared modules
+│   └── terraform/              # One implementation per provider (linode, aws, gcp, azure, stackit)
 ├── e2e/                        # Playwright — login to run to results, in a browser
 ├── scripts/                    # diagrams.ts, diagramTools.ts — render the C4 model
 └── Makefile                    # The entry point for everything — `make help`
@@ -312,7 +312,7 @@ reads. The reasoning lives in the ADRs, and the view descriptions link to them.
 | Staging | Terraform | Production's shape from the same modules at the same versions — five instances, two backend processes, two runner processes. |
 | Production | Terraform | Five instances — app, runner, data, script, directory. Backed up: the audit trail lives here and is the one thing that cannot be rebuilt. |
 
-Each provisioned environment is one private Linode VPC, and the reverse proxy holds the only
+Each provisioned environment is one private VPC, and the reverse proxy holds the only
 public address (NFR-01). The runner is its own instance in all three, because it is the only
 component holding SSH keys and the only one that reaches the script VM — the boundary is drawn
 where the credentials are. The frontend is deliberately not separated from the control plane: it
@@ -327,11 +327,12 @@ which is why it is five instances and not a cheaper arrangement. Only staging an
 a deployment view: dev's shape is in the table above, and a third picture would cost a page
 without carrying a fact.
 
-A provisioned environment's hosts are prepared by `infra/deploy` — the reverse proxy, the systemd
-units that run the containers rootless under an unprivileged user, and the single configuration
-file an operator fills in — and `make deploy-check` runs over all of it on every pull request.
-[The deployment guide](docs/guides/deployment.md) has the order, the credential layout and what a
-release does. The Terraform modules that create the hosts are the piece still missing.
+A provisioned environment's hosts are created by `infra/terraform` — one implementation per
+provider, five of them, behind one interface — and prepared by `infra/deploy`: the reverse proxy,
+the systemd units that run the containers rootless under an unprivileged user, and the single
+configuration file an operator fills in. `make deploy-check` runs over all of it on every pull
+request. [The hosts](infra/terraform/README.md) and [the deployment
+guide](docs/guides/deployment.md) have the order, the credential layout and what a release does.
 
 ### Container images
 
@@ -357,11 +358,13 @@ container's environment, so the terminal's WebSocket address is a property of th
 at its default, the bundle keeps pointing at `ws://localhost:3001` and the terminal — the
 product's critical path — silently fails to connect, with nothing in any log to say why.
 
-Only the Linode implementation is deployed. The modules are written against a provider-agnostic
-interface with AWS, Azure and GCP implementations beside it — `Deployment_Portability` draws
-that contract and what each provider supplies for it. The interface exists to stay honest: one
-with a single implementation is that implementation with extra steps, and the first real port is
-where you learn which assumptions were Linode's rather than the platform's.
+No provider is named in the platform. The hosts are created by five implementations — Linode, AWS,
+GCP, Azure, STACKIT — behind one interface, and `Deployment_Portability` draws that contract and
+what each provider supplies for it. What can be checked without an account is checked on every pull
+request; none of the five has been applied, and [the hosts](infra/terraform/README.md) says exactly
+what that leaves unproven. The interface exists to stay honest: one with a single implementation is
+that implementation with extra steps, and the first real port is where you learn which assumptions
+were a provider's rather than the platform's.
 
 ## Open Decisions
 

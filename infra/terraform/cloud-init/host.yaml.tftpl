@@ -1,0 +1,40 @@
+#cloud-config
+#
+# What a freshly created machine needs before it can be a Scriptoria host, and
+# nothing else. It is provider-neutral on purpose: every provider implementation
+# passes this same document, so "the deployment runs on any of these" is a fact
+# about one file rather than a claim about five.
+#
+# It installs the runtime and the deployment layer and stops. It does not start a
+# single service, because `app.env` does not exist yet — the addresses in it are
+# the outputs of the apply that created this machine, so the order is: apply,
+# read the addresses, write the file, start the units. docs/guides/deployment.md
+# is that order.
+#
+# The images are not here either: they arrive as the release tarball and are
+# loaded with scripts/load-images.sh. Dependencies are vendored into the release
+# rather than fetched at deploy time (NFR-01), so a host that had to pull an image
+# would be a host that could not come up.
+
+package_update: true
+packages:
+  - podman
+  - openssl
+  - ca-certificates
+
+write_files:
+%{ for path, file in files ~}
+  - path: /opt/scriptoria/deploy/${path}
+    permissions: '${file.mode}'
+    encoding: b64
+    content: ${file.content}
+%{ endfor ~}
+
+runcmd:
+  # One implementation of "prepare this host", used by an operator running it by
+  # hand and by this document alike. It creates the service user, allocates the
+  # subordinate ids rootless podman needs, makes the directories, installs the
+  # units and the proxy configuration, and reloads systemd.
+  - [ bash, /opt/scriptoria/deploy/scripts/install.sh ]
+
+final_message: "scriptoria host prepared (${environment}); write /etc/scriptoria/app.env, load the images, then start the units"
