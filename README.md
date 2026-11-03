@@ -46,10 +46,22 @@ back only the block between its own delimiters, and derives *next run* from the 
 every read, so a schedule changed over SSH is picked up without anyone telling the platform.
 Lines written by hand are shown and deliberately not editable.
 
-What is *not* built yet: the audit view (FA-12 is recorded in full but has no screen) and the
-OpenAPI document. The first UI draft is deliberately a throwaway iteration and is meant to
-be rebuilt once it has been seen (NFR-14). Directories marked *(planned)* below do not exist
-yet.
+**The audit log is readable** (FA-12). It was always written in full — every sign-in, run,
+download and administrative change — and now the root account can read it back on screen,
+filtered by account, action, area and time window. It is root's alone: an administrator sees
+the areas, scripts, runs and results their groups reach (FA-02.4), and who did what across the
+platform is a different question. Reading the log is deliberately not itself audited.
+
+**The REST contract is published** — `/api/openapi.json`, and `/api/docs` to read it. It is
+generated from the Zod schemas in `packages/contracts` that the routes already validate with,
+so a field that does not exist in the contract cannot appear in the document. That is the
+promise [ADR-002](docs/architecture/adr/002-one-typescript-monorepo.md) makes for the monorepo,
+and it is why there is no hand-written API document to drift. The page is rendered server-side
+rather than by Swagger UI: NFR-01 puts this platform in a network with no route out, and a page
+that fetches its own renderer from a CDN is blank in exactly the environment it runs in.
+
+The first UI draft is deliberately a throwaway iteration and is meant to be rebuilt once it has
+been seen (NFR-14). Directories marked *(planned)* below do not exist yet.
 
 Full requirements: [`docs/requirements/requirements.md`](docs/requirements/requirements.md).
 The architecture model: [`docs/architecture/workspace.dsl`](docs/architecture/workspace.dsl).
@@ -174,7 +186,7 @@ scriptoria/
 │   ├── openldap/               # Seeded test accounts and groups
 │   ├── deploy/                 # (planned) reverse proxy config and systemd units
 │   └── terraform/              # (planned) dev, staging and prod from shared modules
-├── e2e/                        # (planned) Playwright — the interactive dialogue flow
+├── e2e/                        # Playwright — login to run to results, in a browser
 ├── scripts/                    # diagrams.ts, diagramTools.ts — render the C4 model
 └── Makefile                    # The entry point for everything — `make help`
 ```
@@ -189,6 +201,25 @@ make dev                # postgres, redis, openldap, sshd fixture, structurizr
 make db-migrate db-seed # schema and the reference area
 make run                # frontend :3000, backend :3001, runner
 ```
+
+The backend's own suite needs Postgres running (`make dev`) and creates its own database —
+one per working directory, named `scriptoria_test_<hash>`, so two checkouts cannot truncate
+each other's tables. `make test-db-prune` drops them.
+
+### Running the end-to-end suite
+
+```bash
+make dev          # the stack: postgres, redis, openldap, the sshd fixture
+make test-db      # creates scriptoria_e2e beside the dev database
+make test-e2e     # the suite
+```
+
+The suite brings up its **own** frontend, control plane and runner, on their own
+ports and against their own database. A suite pointed at `make run` would depend
+on whatever state the last session left behind, and one that wrote into the dev
+database would destroy it. What it does not stand up is the infrastructure —
+five containers per run would cost minutes to prove nothing — so `make dev` is
+the precondition, and the suite says so when it is missing.
 
 `make db-push` exists but currently fails against this schema: drizzle-kit cannot introspect
 the expression index on `area_entitlements` (`lower(directory_group)`). `make db-migrate` is
@@ -288,6 +319,30 @@ which is why it is five instances and not a cheaper arrangement. Only staging an
 a deployment view: dev's shape is in the table above, and a third picture would cost a page
 without carrying a fact.
 
+### Container images
+
+Three images, one per process — `make docker-build`, or one at a time. Each is built from the
+workspace root rather than from its own directory: a pnpm workspace app depends on sibling
+packages and on one lockfile that describes all of them.
+
+Each image installs two dependency trees and ships one. The build needs the dev dependencies,
+the runtime must not carry them, and `pnpm install --prod` over an existing tree adds to it
+rather than thinning it — so the production tree is resolved once from a clean base and the
+build's tree never leaves the builder. All three run as `node` and are meant to run rootless
+(NFR-05). Nothing is fetched when a container starts: NFR-01 puts this in a network with no
+route out, so everything is in the image.
+
+One argument is not optional in a real deployment:
+
+```bash
+make docker-build-frontend TERMINAL_WS_URL=wss://scriptoria.example/terminal
+```
+
+`NEXT_PUBLIC_*` is compiled into the client bundle by `next build` and is *not* read from the
+container's environment, so the terminal's WebSocket address is a property of the image. Left
+at its default, the bundle keeps pointing at `ws://localhost:3001` and the terminal — the
+product's critical path — silently fails to connect, with nothing in any log to say why.
+
 Only the Linode implementation is deployed. The modules are written against a provider-agnostic
 interface with AWS, Azure and GCP implementations beside it — `Deployment_Portability` draws
 that contract and what each provider supplies for it. The interface exists to stay honest: one
@@ -303,3 +358,23 @@ at a real script VM:
 
 > **O-6 — a reference script and its setup documentation for the target environment.** Until
 > that exists, the walking skeleton is built against the sshd fixture.
+
+<!-- policy-as-code -->
+
+## Policy as code
+
+Policies that only live in prose drift. This repository enforces its own in
+`tools/policy_check.py` (dependency-free), configured by `policy.json`:
+
+    python3 tools/policy_check.py            # every tracked file
+    python3 tools/policy_check.py --changed  # only what you changed (pre-commit)
+    python3 tools/policy_check.py --ci       # changed vs the base branch (CI)
+
+`--changed` is wired into `.githooks/pre-commit` and the checks also run in
+`.github/workflows/policy.yml`, so a violation fails the commit or the pull
+request. After cloning, enable the hook once:
+
+    git config core.hooksPath .githooks
+
+Documented exceptions belong in `policy.json` under `allow`, each with a reason —
+an exception you can read is a decision; a check nobody runs is decoration.

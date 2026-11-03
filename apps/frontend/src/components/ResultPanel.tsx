@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { ResultList, Run } from "@scriptoria/contracts";
-import { archiveFileName } from "@scriptoria/core";
+import { archiveFileName, collectionSettled } from "@scriptoria/core";
 import { ApiFailure, api } from "@/lib/api";
 import { ResultPreviewDialog } from "./ResultPreviewDialog";
 
@@ -38,7 +38,7 @@ export function ResultPanel({ run }: { run: Run }) {
   const results = useQuery({
     queryKey: ["results", run.id],
     queryFn: () => api.results(run.id),
-    refetchInterval: (query) => resultsRefetchInterval(query.state.data),
+    refetchInterval: (query) => resultsRefetchInterval(query.state.data, run),
   });
 
   const list = results.data;
@@ -238,27 +238,30 @@ function EmptyState({ finished }: { finished: boolean }) {
 }
 
 /**
- * How often the results list is asked for again.
+ * When the results list is asked for again (FA-09.1, FA-09.5).
  *
- * FA-09.1 rests on this, and the obvious rule — ask while the run is live — gets
- * it exactly wrong. The collector lists the output directory when the run
- * *ends* (`resultService.listResults` reads only what it recorded, and it
- * records nothing before the end), so the fetch that matters is the one after
- * the last status change, and an interval driven by the run cancels that very
- * fetch: the run turns terminal, the interval flips to `false`, and the pending
- * tick is cleared instead of issued. The panel is then left holding the
- * pre-collection answer, which for a run that has just written four files is an
- * empty list — and the empty state says so in words: "This run wrote nothing
- * into its output directory".
+ * `partial` is the control plane's own answer — the collector is still working —
+ * and on its own it is not enough. The runner writes the run's terminal status
+ * *before* it lists the output directory, so for a moment a finished run answers
+ * with an empty list that is not `partial`; an interval that stopped on that
+ * answer showed "No result files" for ever beside a status line that said four.
+ * `collectionSettled` is the rule for that moment — the run is over *and* the
+ * collection has had its chance — and it is shared with the console's own poll,
+ * so the two views cannot disagree about when a run is done producing.
  *
- * The list itself says which state it is in: `partial` is the control plane's
- * name for "the run has not ended" (FA-09.3). Polling on that answer rather
- * than on the run's clock keeps asking until the answer is final, and stops
- * there — which is one fetch more than before, in the one case where before
- * there was none.
+ * The count closes the last gap. The run record and this list are polled
+ * independently, so `resultCount` can land here first and switch the polling off
+ * while this query still holds the empty list it fetched a moment earlier.
+ * Asking until the two agree is what ends it.
  */
-export function resultsRefetchInterval(list: ResultList | undefined): number | false {
-  return list?.partial === false ? false : 5_000;
+export function resultsRefetchInterval(list: ResultList | undefined, run: Run): number | false {
+  if (!list || list.partial) return 5_000;
+  if (!collectionSettled(run)) return 5_000;
+
+  const collected = run.resultCount;
+  if (collected !== null && list.files.length < collected) return 5_000;
+
+  return false;
 }
 
 /**
