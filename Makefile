@@ -275,6 +275,7 @@ deploy-check-units:
 	done; \
 	if [ $$fail -ne 0 ]; then exit 1; fi; \
 	echo "  systemd units are valid"
+	@$(DEPLOY_DIR)/scripts/check-units.sh
 
 # A throwaway certificate, because `nginx -t` loads the pair the configuration
 # names and would otherwise fail on the one file that is an operator's to place.
