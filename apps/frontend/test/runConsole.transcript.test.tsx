@@ -78,6 +78,8 @@ const run = (status: Run["status"]): Run => ({
   failureReason: null,
   lastStreamId: "1-1",
   resultCount: 4,
+  /** A second after the run ended, which is the ordinary shape of it. */
+  collectedAt: status === "succeeded" ? "2026-09-24T09:00:10.000Z" : null,
 });
 
 function json(body: unknown): Response {

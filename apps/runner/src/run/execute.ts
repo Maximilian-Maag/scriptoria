@@ -369,7 +369,7 @@ async function collect(
       })),
     );
 
-    await runRepository.setResultCount(runId, count);
+    await runRepository.markCollected(runId, count);
     await runRepository.appendEvent(
       runId,
       "collected",
@@ -379,6 +379,10 @@ async function collect(
     // A collection that failed must not rewrite how the run ended. The script
     // did what it did; this is the platform failing to look afterwards.
     log.error("could not collect the results", { runId, error: describeError(cause) });
+
+    // It is over, though, and saying so is what stops a view polling for an
+    // answer that is not coming: the listing failed, so no count will follow it.
+    await runRepository.markCollected(runId, null);
     await runRepository.appendEvent(runId, "error", `Result collection failed: ${describeError(cause)}`);
   }
 }

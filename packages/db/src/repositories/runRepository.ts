@@ -28,6 +28,7 @@ const toRun = (row: schema.RunRow): Run => ({
   failureReason: (row.failureReason as RunFailureReason | null) ?? null,
   lastStreamId: row.lastStreamId,
   resultCount: row.resultCount,
+  collectedAt: row.collectedAt?.toISOString() ?? null,
 });
 
 export async function createRun(input: {
@@ -163,12 +164,20 @@ export async function recordAbortRequest(id: string, requestedBy: string): Promi
 }
 
 /**
- * Set by the collector once the output directory has been listed. Separate from
- * `transition` on purpose: the count says what the run left behind, and must
- * not be able to move the run to a different state on its way in.
+ * The collection is over, and this is what it found.
+ *
+ * One writer for both halves on purpose: `collectedAt` is what a view polls on
+ * and `resultCount` is what it displays, and a collection that failed ends with
+ * the first and not the second. Written on every path that ends a collection,
+ * including the two where no worker is left to end one — see `abortRun` and
+ * `reapIfOrphaned` — because "nobody is going to collect this" is a fact the
+ * interface cannot infer and must not wait out on a timer.
  */
-export async function setResultCount(id: string, count: number): Promise<void> {
-  await db().update(schema.runs).set({ resultCount: count }).where(eq(schema.runs.id, id));
+export async function markCollected(id: string, count: number | null = null): Promise<void> {
+  await db()
+    .update(schema.runs)
+    .set({ collectedAt: new Date(), resultCount: count })
+    .where(eq(schema.runs.id, id));
 }
 
 export async function appendEvent(

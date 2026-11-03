@@ -21,14 +21,16 @@ import type { Session } from "../src/lib/auth/session";
 
 // `vi.mock` is hoisted above the imports, so the spies have to be created in a
 // hoisted block as well.
-const { getRun, transition, appendEvent, recordAbortRequest, publish, record } = vi.hoisted(() => ({
-  getRun: vi.fn(),
-  transition: vi.fn(),
-  appendEvent: vi.fn(),
-  recordAbortRequest: vi.fn(),
-  publish: vi.fn(),
-  record: vi.fn(),
-}));
+const { getRun, transition, appendEvent, recordAbortRequest, markCollected, publish, record } =
+  vi.hoisted(() => ({
+    getRun: vi.fn(),
+    transition: vi.fn(),
+    appendEvent: vi.fn(),
+    recordAbortRequest: vi.fn(),
+    markCollected: vi.fn(),
+    publish: vi.fn(),
+    record: vi.fn(),
+  }));
 
 vi.mock("@scriptoria/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@scriptoria/db")>();
@@ -40,6 +42,7 @@ vi.mock("@scriptoria/db", async (importOriginal) => {
       transition,
       appendEvent,
       recordAbortRequest,
+      markCollected,
     },
     auditRepository: { ...actual.auditRepository, record },
   };
@@ -80,6 +83,7 @@ beforeEach(() => {
   transition.mockReset();
   appendEvent.mockReset();
   recordAbortRequest.mockReset();
+  markCollected.mockReset();
   publish.mockReset();
   record.mockReset();
 });
@@ -101,6 +105,10 @@ describe("aborting a run that has not started", () => {
     // subscribed, so a published stop is dropped on the floor.
     expect(recordAbortRequest).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
+    // And the collection is over before it began: nothing was started, so there
+    // is no output directory to list. A view that was not told this would wait
+    // for a file that is never written.
+    expect(markCollected).toHaveBeenCalledWith(RUN_ID, null);
     // FA-12.1 — the audit says what happened, and it is now true.
     expect(record).toHaveBeenCalledTimes(1);
     expect(record.mock.calls[0]?.[0]).toMatchObject({
@@ -122,6 +130,9 @@ describe("aborting a run that has not started", () => {
     expect(result.ok).toBe(true);
     expect(recordAbortRequest).toHaveBeenCalledTimes(1);
     expect(publish).toHaveBeenCalledTimes(1);
+    // A worker has it, so it will collect: the run is not over, and saying it
+    // were would stop the polls for results that are still coming.
+    expect(markCollected).not.toHaveBeenCalled();
   });
 
   it("still stops a running run the way it always did", async () => {

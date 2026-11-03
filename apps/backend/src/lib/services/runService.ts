@@ -225,6 +225,11 @@ export async function abortRun(
         `Requested by ${session.username} before the run started`,
       );
 
+      // Nothing was started, so there is no output directory and no collection
+      // coming: the run is over and it produced nothing. Saying so is what stops
+      // a view waiting for a file that will never be written.
+      await runRepository.markCollected(runId, null);
+
       await audit.record({
         actor: session.username,
         action: "run_aborted",
@@ -288,6 +293,13 @@ export async function reapIfOrphaned(run: Run): Promise<Run> {
     ["starting", "running"],
   );
   await runRepository.appendEvent(run.id, "error", "The worker holding this run is gone");
+
+  // And the collection is over with it. The claim key is the evidence this whole
+  // decision rests on — a worker renews it for as long as it is working, so its
+  // absence means nobody is left to list the output directory. Recording that is
+  // what lets a view stop asking; without it the run would be terminal,
+  // uncollected, and polled for ever.
+  await runRepository.markCollected(run.id, null);
 
   return { ...run, status: "failed", failureReason: "worker_lost" };
 }

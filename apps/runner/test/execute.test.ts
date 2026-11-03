@@ -100,11 +100,17 @@ interface DbState {
   /** -1 until something recorded results, so "never ran" is distinguishable. */
   results: number;
   collected: string[];
-  resultCount: number[];
+  /**
+   * Every `markCollected` the run made, in order, with the count it carried —
+   * `null` being "the collection is over and it recorded nothing".
+   */
+  markedCollected: (number | null)[];
   /** What the next `findRunById` answers, as the run record stands. */
   run: Record<string, unknown>;
   /** Set to make the next transcript write fail, which is what #53 is about. */
   saveTranscriptThrows: boolean;
+  /** Set to make the result listing fail, the way an SFTP error does. */
+  resultsThrow: boolean;
   /** Set to make the run's first read fail, the way a database blip does. */
   findRunThrows: boolean;
   /** Set to make every write fail, the way an unreachable database does. */
@@ -130,9 +136,10 @@ vi.mock("@scriptoria/db", async () => {
     transcript: null,
     results: -1,
     collected: [],
-    resultCount: [],
+    markedCollected: [],
     run: {},
     saveTranscriptThrows: false,
+    resultsThrow: false,
     findRunThrows: false,
     transitionThrows: false,
     scriptMissing: false,
@@ -173,8 +180,8 @@ vi.mock("@scriptoria/db", async () => {
         if (db.saveTranscriptThrows) throw new Error("the transcript insert failed");
         db.transcript = { sizeBytes, truncated };
       },
-      setResultCount: async (_id: string, count: number) => {
-        db.resultCount.push(count);
+      markCollected: async (_id: string, count: number | null = null) => {
+        db.markedCollected.push(count);
       },
     },
     scriptRepository: {
@@ -197,6 +204,7 @@ vi.mock("@scriptoria/db", async () => {
     },
     resultRepository: {
       recordResults: async (_runId: string, files: { path: string }[]) => {
+        if (db.resultsThrow) throw new Error("the results could not be written");
         db.results = files.length;
         db.collected = files.map((file) => file.path);
         return files.length;
@@ -310,8 +318,9 @@ function fresh(): ScriptState {
   db.transcript = null;
   db.results = -1;
   db.collected = [];
-  db.resultCount = [];
+  db.markedCollected = [];
   db.saveTranscriptThrows = false;
+  db.resultsThrow = false;
   db.findRunThrows = false;
   db.transitionThrows = false;
   db.scriptMissing = false;
@@ -401,7 +410,7 @@ describe("executeRun", () => {
     expect(chunks).toHaveLength(2);
     expect(db().transcript?.sizeBytes).toBe(11);
     expect(db().collected).toEqual(["report.txt"]);
-    expect(db().resultCount).toEqual([1]);
+    expect(db().markedCollected).toEqual([1]);
     expect(db().transitions.map((t) => t.to)).toEqual(["starting", "running", "succeeded"]);
   });
 
@@ -425,6 +434,27 @@ describe("executeRun", () => {
     expect(db().transitions.map((t) => t.to)).toEqual(["starting", "running", "succeeded"]);
     expect(db().events.map((e) => `${e.kind}: ${e.message}`)).toContain(
       "error: Transcript not persisted: Error: the transcript insert failed",
+    );
+  });
+
+  /**
+   * A collection has two endings and only one of them has a number. Without
+   * recording the other, a view polls for a count that is never coming — which is
+   * what the interface used to infer from elapsed time instead, so a collection
+   * slower than that interval looked exactly like a failed one (#97).
+   */
+  it("records the end of a collection that failed, so a view stops asking", async () => {
+    const script = fresh();
+    db().resultsThrow = true;
+
+    const done = executeRun(RUN_ID, WORKER);
+    await running();
+    script.resolveExit({ code: 0, signal: null });
+    await done;
+
+    expect(db().markedCollected).toEqual([null]);
+    expect(db().events.map((e) => `${e.kind}: ${e.message}`)).toContain(
+      "error: Result collection failed: Error: the results could not be written",
     );
   });
 
