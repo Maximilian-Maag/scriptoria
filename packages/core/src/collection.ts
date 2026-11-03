@@ -30,7 +30,13 @@ export function collectionSettled(run: Run): boolean {
 
   // Ended without a count: the collection failed, or the platform decided none
   // is coming. Either way there is nothing left to wait for.
-  if (run.collectedAt !== null) return true;
+  //
+  // Truthiness rather than `!== null`, and for the same reason the count is
+  // checked that way above: a payload that predates this field — a frontend
+  // talking to a backend that has not been replaced yet — would otherwise read as
+  // "collected" on the strength of a field that is not there, and stop asking
+  // about a run that is still producing.
+  if (run.collectedAt) return true;
 
   // Terminal without an end time never reached the script VM at all — there is
   // no output directory to list and nothing will ever arrive.

@@ -101,10 +101,14 @@ interface DbState {
   results: number;
   collected: string[];
   /**
-   * Every `markCollected` the run made, in order, with the count it carried —
-   * `null` being "the collection is over and it recorded nothing".
+   * What the row holds, rather than what was called: the count a collection
+   * wrote, and whether the collection is recorded as over at all. Modelled
+   * separately because the failure write must not be able to clear the count.
    */
-  markedCollected: (number | null)[];
+  resultCount: number | null;
+  collectionEnded: boolean;
+  /** Set to make the `collected` event insert fail, after the count is written. */
+  collectedEventThrows: boolean;
   /** What the next `findRunById` answers, as the run record stands. */
   run: Record<string, unknown>;
   /** Set to make the next transcript write fail, which is what #53 is about. */
@@ -136,7 +140,9 @@ vi.mock("@scriptoria/db", async () => {
     transcript: null,
     results: -1,
     collected: [],
-    markedCollected: [],
+    resultCount: null,
+    collectionEnded: false,
+    collectedEventThrows: false,
     run: {},
     saveTranscriptThrows: false,
     resultsThrow: false,
@@ -169,6 +175,9 @@ vi.mock("@scriptoria/db", async () => {
         return accepted;
       },
       appendEvent: async (_id: string, kind: string, message: string, stage: unknown = null) => {
+        if (db.collectedEventThrows && kind === "collected") {
+          throw new Error("the event insert failed");
+        }
         db.events.push({ kind, message, stage });
       },
       saveTranscript: async (
@@ -180,8 +189,14 @@ vi.mock("@scriptoria/db", async () => {
         if (db.saveTranscriptThrows) throw new Error("the transcript insert failed");
         db.transcript = { sizeBytes, truncated };
       },
-      markCollected: async (_id: string, count: number | null = null) => {
-        db.markedCollected.push(count);
+      markCollected: async (_id: string, count: number) => {
+        db.resultCount = count;
+        db.collectionEnded = true;
+      },
+      markCollectionEnded: async (_id: string) => {
+        // The count is deliberately left alone: this is the write for the ends
+        // nobody collects, and it must not undo a collection that happened.
+        db.collectionEnded = true;
       },
     },
     scriptRepository: {
@@ -318,7 +333,9 @@ function fresh(): ScriptState {
   db.transcript = null;
   db.results = -1;
   db.collected = [];
-  db.markedCollected = [];
+  db.resultCount = null;
+  db.collectionEnded = false;
+  db.collectedEventThrows = false;
   db.saveTranscriptThrows = false;
   db.resultsThrow = false;
   db.findRunThrows = false;
@@ -410,7 +427,8 @@ describe("executeRun", () => {
     expect(chunks).toHaveLength(2);
     expect(db().transcript?.sizeBytes).toBe(11);
     expect(db().collected).toEqual(["report.txt"]);
-    expect(db().markedCollected).toEqual([1]);
+    expect(db().resultCount).toBe(1);
+    expect(db().collectionEnded).toBe(true);
     expect(db().transitions.map((t) => t.to)).toEqual(["starting", "running", "succeeded"]);
   });
 
@@ -452,10 +470,29 @@ describe("executeRun", () => {
     script.resolveExit({ code: 0, signal: null });
     await done;
 
-    expect(db().markedCollected).toEqual([null]);
+    expect(db().resultCount).toBeNull();
+    expect(db().collectionEnded).toBe(true);
     expect(db().events.map((e) => `${e.kind}: ${e.message}`)).toContain(
       "error: Result collection failed: Error: the results could not be written",
     );
+  });
+
+  /**
+   * The other half of the same write: the count lands and the *event* announcing
+   * it does not. The failure path must not then clear the count it just recorded
+   * — the run collected one file, and the interface has to go on saying so.
+   */
+  it("keeps the count when the collected event cannot be written", async () => {
+    const script = fresh();
+    db().collectedEventThrows = true;
+
+    const done = executeRun(RUN_ID, WORKER);
+    await running();
+    script.resolveExit({ code: 0, signal: null });
+    await done;
+
+    expect(db().resultCount).toBe(1);
+    expect(db().collectionEnded).toBe(true);
   });
 
   /**
