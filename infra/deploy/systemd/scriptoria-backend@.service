@@ -33,8 +33,9 @@ KillMode=mixed
 
 # HOST_PORT is this process's port; the proxy's upstream file lists one per
 # process. Nothing else reaches it — the publish is bound to loopback.
-EnvironmentFile=-/etc/scriptoria/%N.env
-LoadCredential=app:/etc/scriptoria/app.env
+Environment=IMAGE_TAG=latest
+EnvironmentFile=/etc/scriptoria/%N.env
+LoadCredential=app.env:/etc/scriptoria/app.env
 
 ExecStartPre=-/usr/bin/podman rm --force --ignore %p-%i
 ExecStart=/usr/bin/podman run \
@@ -43,11 +44,11 @@ ExecStart=/usr/bin/podman run \
   --pull=never \
   --network=scriptoria \
   --env-file=%d/app.env \
-  --publish 127.0.0.1:${HOST_PORT:-3001}:3001 \
+  --publish 127.0.0.1:${HOST_PORT}:3001 \
   --health-on-failure=kill \
   --detach=false \
   --log-driver=journald \
-  scriptoria-backend:${IMAGE_TAG:-latest}
+  scriptoria-backend:${IMAGE_TAG}
 # SIGTERM closes the listener and the pools, and deliberately does NOT stop
 # running scripts — the PTYs belong to the runner, and a control plane restart
 # that killed them is the exact failure the runner was separated out to prevent.

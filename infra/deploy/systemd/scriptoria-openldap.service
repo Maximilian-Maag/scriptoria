@@ -31,8 +31,9 @@ KillMode=mixed
 # the container's; LDAP_URL, LDAP_BASE_DN and the bind variables beside them in the
 # same file are the apps'. They describe one directory, and check-env.sh is what
 # keeps them describing the same one.
+Environment=BIND_ADDRESS=127.0.0.1
 EnvironmentFile=-/etc/scriptoria/%N.env
-LoadCredential=app:/etc/scriptoria/app.env
+LoadCredential=app.env:/etc/scriptoria/app.env
 
 ExecStartPre=-/usr/bin/podman rm --force --ignore %N
 ExecStart=/usr/bin/podman run \
@@ -41,7 +42,7 @@ ExecStart=/usr/bin/podman run \
   --pull=never \
   --network=scriptoria \
   --env-file=%d/app.env \
-  --publish ${BIND_ADDRESS:-127.0.0.1}:1389:1389 \
+  --publish ${BIND_ADDRESS}:1389:1389 \
   --volume /var/lib/scriptoria/openldap:/bitnami/openldap:Z \
   --volume /etc/scriptoria/ldifs:/ldifs:ro \
   --detach=false \

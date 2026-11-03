@@ -36,12 +36,14 @@ KillMode=mixed
 # Instance values the deployment sets — here only the port the container is
 # published on, because the proxy and the container are on the same host and
 # nothing else may reach it.
+Environment=IMAGE_TAG=latest
+Environment=HOST_PORT=3000
 EnvironmentFile=-/etc/scriptoria/%N.env
 # Everything else comes from the credential store: DATABASE_URL, REDIS_URL, the
 # directory, the session settings, the runner's SSH paths. One file for the whole
 # deployment rather than one per process, because the same variables are read by
 # all of them and a second list is a second thing to keep in step.
-LoadCredential=app:/etc/scriptoria/app.env
+LoadCredential=app.env:/etc/scriptoria/app.env
 
 ExecStartPre=-/usr/bin/podman rm --force --ignore %N
 ExecStart=/usr/bin/podman run \
@@ -50,11 +52,11 @@ ExecStart=/usr/bin/podman run \
   --pull=never \
   --network=scriptoria \
   --env-file=%d/app.env \
-  --publish 127.0.0.1:${HOST_PORT:-3000}:3000 \
+  --publish 127.0.0.1:${HOST_PORT}:3000 \
   --health-on-failure=kill \
   --detach=false \
   --log-driver=journald \
-  scriptoria-frontend:${IMAGE_TAG:-latest}
+  scriptoria-frontend:${IMAGE_TAG}
 ExecStop=/usr/bin/podman stop --time 15 %N
 
 Restart=on-failure
