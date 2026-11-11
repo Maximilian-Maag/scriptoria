@@ -41,6 +41,13 @@ jobs:
       - name: Lint
         run: make lint
 
+      # A step rather than a job: it takes a second, and a *new* required check would gate
+      # nothing until it was added to both branch protections (docs/guides/branching-and-ci.md).
+      # What it protects is the one thing nothing else compares: a setting the code reads and
+      # neither `.env` example mentions.
+      - name: Settings are documented in the example files
+        run: make env-check
+
   # ── Tests ────────────────────────────────────────────────────────────────────
   #
   # One leg per package, so a slow suite stops being every suite's problem and a
