@@ -1,4 +1,5 @@
-import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql, type SQL } from "drizzle-orm";
+import { chooseAdmissions } from "@scriptoria/core";
 import type {
   AbortStage,
   Criticality,
@@ -240,4 +241,129 @@ export async function getTranscript(runId: string) {
     where: eq(schema.runTranscripts.runId, runId),
   });
   return row ?? null;
+}
+
+// ── Dispatch (O-7, ADR-013) ──────────────────────────────────────────────────
+
+export interface AdmittedRun {
+  id: string;
+  host: string;
+  queuedAt: Date;
+}
+
+/**
+ * O-7 — release runs that were dispatched and never claimed.
+ *
+ * A dispatched run occupies its script VM until a worker claims it, which is what
+ * keeps the next sweep from admitting a second run into the same directory. The
+ * cost of that is a mark that can outlive its job: a control plane that died
+ * between the push and the claim, or a queue that lost the entry. Left alone,
+ * such a run would hold its VM for ever, so the mark is cleared once it is older
+ * than any plausible claim, and the next sweep dispatches the run again. A second
+ * job for a run is harmless: the runner's claim is `SET NX`, so the duplicate is
+ * discarded rather than opening a second PTY.
+ */
+export async function releaseStaleDispatches(staleSeconds: number): Promise<string[]> {
+  if (staleSeconds < 1) return [];
+
+  const rows = await db()
+    .update(schema.runs)
+    .set({ dispatchedAt: null })
+    .where(
+      and(
+        eq(schema.runs.status, "queued"),
+        isNotNull(schema.runs.dispatchedAt),
+        lt(schema.runs.dispatchedAt, sql`now() - (${staleSeconds} * interval '1 second')`),
+      ),
+    )
+    .returning({ id: schema.runs.id });
+
+  return rows.map((row) => row.id);
+}
+
+/**
+ * The runs a script VM is carrying, by id, so dispatch can ask whether the worker
+ * behind one of them still exists (ADR-011's claim is the evidence, and it lives
+ * in Redis, so the check is not a join).
+ */
+export async function listActiveByHost(): Promise<Array<{ id: string; host: string }>> {
+  return db()
+    .select({ id: schema.runs.id, host: schema.runs.host })
+    .from(schema.runs)
+    .where(inArray(schema.runs.status, ["starting", "running"]));
+}
+
+/** Whether anything is waiting at all, so an idle platform does no work. */
+export async function countQueued(): Promise<number> {
+  const [row] = await db()
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.runs)
+    .where(eq(schema.runs.status, "queued"));
+  return row?.count ?? 0;
+}
+
+/**
+ * O-7 — admit queued runs to their script VMs, oldest first, and mark them
+ * dispatched in the same breath.
+ *
+ * The whole function is one transaction that takes an advisory lock per script VM
+ * first: the count of what a VM is carrying and the mark that adds to it have to
+ * be indivisible, or two processes can each see one free slot and admit a run
+ * into it. Locks are taken in host order so two sweeps meeting each other cannot
+ * deadlock.
+ *
+ * Capacity is counted from the database and includes runs a worker has only
+ * *started* to open a connection for, because those are on the VM too — and runs
+ * dispatched but not yet claimed, which is the case a sweep apart from the job
+ * push would miss.
+ */
+export async function admitForDispatch(
+  perHostLimit: number,
+  batch: number,
+): Promise<AdmittedRun[]> {
+  if (perHostLimit < 1 || batch < 1) return [];
+
+  return db().transaction(async (tx) => {
+    const waiting = await tx
+      .selectDistinct({ host: schema.runs.host })
+      .from(schema.runs)
+      .where(and(eq(schema.runs.status, "queued"), isNull(schema.runs.dispatchedAt)))
+      .orderBy(asc(schema.runs.host));
+
+    for (const { host } of waiting) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${host})::bigint)`);
+    }
+
+    const busy = await tx
+      .select({ host: schema.runs.host, count: sql<number>`count(*)::int` })
+      .from(schema.runs)
+      .where(
+        or(
+          inArray(schema.runs.status, ["starting", "running"]),
+          and(eq(schema.runs.status, "queued"), isNotNull(schema.runs.dispatchedAt)),
+        ),
+      )
+      .groupBy(schema.runs.host);
+
+    const candidates = await tx
+      .select({ id: schema.runs.id, host: schema.runs.host, queuedAt: schema.runs.queuedAt })
+      .from(schema.runs)
+      .where(and(eq(schema.runs.status, "queued"), isNull(schema.runs.dispatchedAt)))
+      .orderBy(asc(schema.runs.queuedAt), asc(schema.runs.id))
+      .limit(batch);
+
+    const admitted = chooseAdmissions(
+      candidates,
+      new Map(busy.map((row) => [row.host, row.count])),
+      perHostLimit,
+      batch,
+    );
+    if (admitted.length === 0) return [];
+
+    return tx
+      .update(schema.runs)
+      .set({ dispatchedAt: sql`now()` })
+      .where(inArray(schema.runs.id, admitted))
+      .returning({ id: schema.runs.id, host: schema.runs.host, queuedAt: schema.runs.queuedAt });
+  });
 }
