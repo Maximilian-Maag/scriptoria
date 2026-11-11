@@ -19,7 +19,7 @@
  * open in another terminal and would rather not have it killed.
  */
 import { defineConfig, devices } from "@playwright/test";
-import { BASE_URL, BACKEND_ORIGIN } from "./src/env";
+import { BASE_URL } from "./src/env";
 
 const CI = Boolean(process.env.CI);
 
@@ -105,7 +105,6 @@ export default defineConfig({
       // behaves differently from the one the deployment runs.
       ...process.env,
       NODE_ENV: "development",
-      BACKEND_PUBLIC_ORIGIN: BACKEND_ORIGIN,
     },
   },
 });

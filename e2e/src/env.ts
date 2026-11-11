@@ -20,9 +20,6 @@ const env = (name: string, fallback: string): string => process.env[name] ?? fal
 /** Where the browser goes. The frontend, never the control plane (ADR-007). */
 export const BASE_URL = env("E2E_BASE_URL", "http://localhost:3000");
 
-/** The control plane's own address, for the WebSocket the browser opens directly. */
-export const BACKEND_ORIGIN = env("E2E_BACKEND_ORIGIN", "http://localhost:3001");
-
 /**
  * The directory fixture's four accounts (infra/openldap/ldifs/00-users.ldif).
  *
