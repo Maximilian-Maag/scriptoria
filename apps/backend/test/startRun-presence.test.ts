@@ -35,6 +35,15 @@ vi.mock("../src/lib/redis", () => ({
   redis: () => ({ lpush: vi.fn() }),
 }));
 
+/**
+ * O-7 puts the dispatch decision in front of every start (ADR-013), and what this
+ * file is about is the presence rule, not the queue. The dispatch is stubbed so a
+ * test about a vanished script does not need a script VM's capacity.
+ */
+vi.mock("../src/lib/services/runDispatch", () => ({
+  dispatchQueuedRuns: vi.fn().mockResolvedValue({ admitted: 1, released: 0 }),
+}));
+
 const { startRun } = await import("../src/lib/services/runService");
 
 const SCANNED_AT = new Date("2026-09-21T10:00:00.000Z");

@@ -46,7 +46,7 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
                 svc_authz = component "Authorization Service" "Rebuilds the area set from the directory at every login (NFR-03)."
                 svc_areas = component "Area Administration Service" "Areas, the script directories mapped onto them, group references."
                 svc_catalog = component "Script Catalog Service" "Caches the parsed script headers (ADR-004)."
-                svc_runs = component "Run Orchestrator" "The run state machine. The only component that may dispatch one."
+                svc_runs = component "Run Orchestrator" "The run state machine. The only component that may dispatch one — and it admits at most one run per script VM at a time (ADR-013)."
                 svc_results = component "Result Service" "Lists, streams and ZIPs a run's output files (FA-09.5)."
                 svc_schedules = component "Schedule Service" "Reads and writes the crontab; computes the next run (ADR-005)."
                 svc_audit = component "Audit Service" "Records who did what, where, when and with what outcome."

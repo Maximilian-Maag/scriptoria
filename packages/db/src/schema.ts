@@ -244,12 +244,30 @@ export const runs = pgTable(
      * Without it the interface had to guess, and the guess was elapsed time.
      */
     collectedAt: timestamp("collected_at", { withTimezone: true }),
+
+    /**
+     * O-7 / ADR-013 — when the control plane put this run's job on the queue.
+     *
+     * Capacity is counted from the database, so a run that has been dispatched
+     * but not yet claimed has to be visible as occupying its script VM;
+     * otherwise the next sweep sees an idle VM and admits a second run into the
+     * same output directory, which is the one thing the limit exists to stop.
+     * The mark and the admission decision are therefore written together, inside
+     * the transaction that holds the VM's lock.
+     *
+     * Cleared by the sweeper once a run has sat queued-and-marked longer than a
+     * worker could plausibly take to claim it — which is also the recovery path
+     * for a job that never reached the queue.
+     */
+    dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
   },
   (table) => [
     index("runs_area_queued_idx").on(table.areaId, table.queuedAt),
     index("runs_script_idx").on(table.scriptId),
     index("runs_status_idx").on(table.status),
     index("runs_started_by_idx").on(table.startedBy),
+    /** O-7: capacity is counted per host, on every sweep. */
+    index("runs_host_status_idx").on(table.host, table.status),
   ],
 );
 
