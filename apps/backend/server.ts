@@ -3,6 +3,7 @@ import next from "next";
 import { loadBackendConfig, loadEnvFile } from "@scriptoria/config";
 import { handleUpgrade } from "./src/lib/stream/gateway";
 import { startDispatchSweep } from "./src/lib/services/runDispatch";
+import { startRetentionSweep } from "./src/lib/services/runRetention";
 import { closeDb } from "@scriptoria/db";
 import { closeRedis } from "./src/lib/redis";
 
@@ -61,6 +62,16 @@ server.listen(config.BACKEND_PORT, () => {
 const stopDispatchSweep = startDispatchSweep();
 
 /**
+ * O-5 / ADR-014 — the transcript retention sweep.
+ *
+ * Hours apart, and its first pass is the one that matters: a database that has been
+ * collecting transcripts without this gets its window applied as the process comes
+ * up, rather than one interval later. Nothing else about a run is touched — the
+ * record, its events and the audit trail stay.
+ */
+const stopRetentionSweep = startRetentionSweep();
+
+/**
  * A shutdown closes the HTTP listener and the pools, and nothing else. It does
  * NOT try to stop running scripts: the PTYs belong to the runner, and a control
  * plane restart that killed them would be the exact failure the runner was
@@ -77,6 +88,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     // and a control plane that is going away is not going to be the one to do it —
     // the next process dispatches it on boot.
     stopDispatchSweep();
+    stopRetentionSweep();
 
     server.close(() => {
       void Promise.allSettled([closeDb(), closeRedis(), app.close()]).then(() => process.exit(0));

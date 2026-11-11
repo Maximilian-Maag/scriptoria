@@ -132,8 +132,11 @@ export async function listEvents(session: Session, runId: string): Promise<Resul
 /**
  * FA-07.2 — the scrollback of a run that is over, from the durable copy.
  *
- * The live stream is capped and expires; this does not. A run opened a month
- * later shows the same bytes it showed while it was running.
+ * The live stream is capped and expires; the transcript outlives it, so a run
+ * opened a month later shows the bytes it showed while it was running — for as long
+ * as the deployment keeps them (O-5, ADR-014). Past that window the bytes are gone
+ * and `expired` says so: the console has to be able to tell a pruned transcript from
+ * a script that printed nothing, because only one of those is the platform's doing.
  */
 export async function getTranscript(
   session: Session,
@@ -147,14 +150,17 @@ export async function getTranscript(
     // A run that never produced one is not an error: many scripts deliberately
     // print nothing at all (FA-07.5), and a run that is still going has not
     // been persisted yet — the live stream is where its output is.
-    return ok({ runId, contentBase64: "", sizeBytes: 0, truncated: false });
+    return ok({ runId, contentBase64: "", sizeBytes: 0, truncated: false, expired: false });
   }
 
+  // The size is kept after pruning, so the console can still say how much output
+  // there was; only the bytes are gone.
   return ok({
     runId,
     contentBase64: transcript.content,
     sizeBytes: transcript.sizeBytes,
     truncated: transcript.truncated,
+    expired: transcript.prunedAt !== null,
   });
 }
 

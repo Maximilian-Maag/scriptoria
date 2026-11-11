@@ -130,6 +130,21 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
 
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1 p-4">
+          {/**
+           * O-5 / ADR-014 — a transcript past its retention window is gone, and the
+           * terminal below would otherwise look exactly like a script that printed
+           * nothing (FA-07.5). Only one of those is the platform's doing, so it says
+           * which. The size still comes back, so the line can name what was there.
+           */}
+          {transcript.data?.expired ? (
+            <p className="mb-3 border-l-2 border-line-strong pl-3 text-[13px] text-ink-muted">
+              This run&apos;s terminal output was deleted after the retention period
+              {transcript.data.sizeBytes > 0
+                ? ` (${Math.round(transcript.data.sizeBytes / 1024)} KB)`
+                : ""}
+              . The run record and its results are kept.
+            </p>
+          ) : null}
           <TerminalView
             runId={runId}
             live={live}

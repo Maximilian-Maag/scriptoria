@@ -33,6 +33,7 @@ export {
 } from "./cron";
 export { commandRunsScript } from "./scriptReference";
 export { chooseAdmissions, type QueuedCandidate } from "./dispatch";
+export { retentionCutoff, RETENTION_DEFAULT_DAYS, type RetentionCutoff } from "./retention";
 export {
   encodeTerminalFrame,
   decodeTerminalFrame,

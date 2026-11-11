@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import "./support/setup";
 import { sql } from "drizzle-orm";
 import { db, runRepository } from "@scriptoria/db";
+import postgres from "postgres";
+import { TEST_DATABASE_URL } from "./support/database";
 import { seedArea } from "./support/fixtures";
 
 /**
@@ -288,5 +290,37 @@ describe("dispatching a queued run to its script VM", () => {
     expect(outcome.admitted).toBe(0);
     expect(pushed()).toEqual([]);
     expect(await isDispatched(live)).toBe(true);
+  });
+
+  it("waits for the dispatch lock instead of deciding alongside another dispatcher", async () => {
+    // The property the single lock exists for, and the only way to assert it from one
+    // process: hold the lock from another connection and prove admission blocks on
+    // it. Remove the lock and this test resolves immediately — which is exactly the
+    // failure it is here to catch (a per-host lock set was not enough, because the
+    // hosts to lock came from a query).
+    const area = await seedArea("Network");
+    const runId = await queuedRun(area, "vm-a.test", 1);
+
+    const blocker = postgres(TEST_DATABASE_URL, { max: 1, onnotice: () => {} });
+    try {
+      await blocker.unsafe("begin");
+      // The same constant the repository takes: 4_812_013_001 in DISPATCH_LOCK.
+      await blocker.unsafe("select pg_advisory_xact_lock(4812013001)");
+
+      const admission = runRepository.admitForDispatch(1, 10);
+
+      const winner = await Promise.race([
+        admission.then(() => "admitted" as const),
+        new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 300)),
+      ]);
+      expect(winner, "a second dispatcher waits rather than deciding").toBe("blocked");
+
+      await blocker.unsafe("commit");
+
+      const admitted = await admission;
+      expect(admitted.map((run) => run.id)).toEqual([runId]);
+    } finally {
+      await blocker.end({ timeout: 5 });
+    }
   });
 });

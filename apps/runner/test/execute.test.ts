@@ -238,6 +238,13 @@ interface ScriptState {
   dataListener: ((chunk: Buffer) => void) | null;
   resolveExit: (value: { code: number | null; signal: string | null }) => void;
   exit: Promise<{ code: number | null; signal: string | null }>;
+  /**
+   * Held to keep `signal()` from returning, which is what the real one is doing while
+   * it waits for the SSH exec channel to answer. A script that dies on SIGINT closes
+   * that channel, so the round trip and the exit race each other — the case a stop
+   * has to be classified correctly in.
+   */
+  signalHold: Promise<void> | null;
   /** Incremented per listing, so "before" and "after" can differ. */
   listCalls: number;
 }
@@ -267,6 +274,7 @@ vi.mock("../src/driver/sshTarget", async () => ({
         resize: () => {},
         signal: async (stage: string) => {
           script.signals.push(stage);
+          if (script.signalHold) await script.signalHold;
         },
         exit: script.exit,
       };
@@ -364,7 +372,14 @@ function fresh(): ScriptState {
   const exit = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
     resolveExit = resolve;
   });
-  const script: ScriptState = { signals: [], dataListener: null, resolveExit, exit, listCalls: 0 };
+  const script: ScriptState = {
+    signals: [],
+    dataListener: null,
+    resolveExit,
+    exit,
+    signalHold: null,
+    listCalls: 0,
+  };
   (globalThis as Record<string, unknown>)[TARGET] = script;
   return script;
 }
@@ -706,4 +721,49 @@ describe("executeRun", () => {
       detail: { status: "failed", failureReason: "start_failed" },
     });
   });
+
+  /**
+   * FA-08.3 / ADR-003 — a stop whose signal never returns is still a stop.
+   *
+   * The signal goes over SSH: `kill -INT -<pid>` on a second exec channel, and the
+   * call returns when that channel answers. A script that dies on SIGINT closes the
+   * channel first, so the exit is classified while the abort still believes it has
+   * signalled nothing — and the run is recorded as a lost connection. Measured in
+   * the end-to-end suite: a rollout stopped in the interface came back `failed /
+   * connection_lost`, with its own `abort_signalled` event written one moment later,
+   * and the interface told the operator their decision had been an accident.
+   */
+  it("records a run a human stopped as aborted even when the process dies before the signal returns", async () => {
+    const script = fresh();
+
+    // The round trip the real signal makes, held open: the exit arrives first, which
+    // is exactly the race.
+    let releaseSignal: () => void = () => {};
+    script.signalHold = new Promise<void>((resolve) => {
+      releaseSignal = resolve;
+    });
+
+    const done = executeRun(RUN_ID, WORKER);
+    await running();
+
+    deliverControl(RUN_ID, { type: "abort", requestedBy: "admin", at: new Date().toISOString() });
+    await tick();
+
+    // The script dies of the SIGINT it was just sent — before the sender learns that
+    // it landed.
+    script.resolveExit({ code: null, signal: "SIGINT" });
+    await tick();
+    await tick();
+
+    releaseSignal();
+    await done;
+
+    expect(db().status).toBe("aborted");
+    expect(db().transitions.at(-1)?.patch.failureReason).toBe("aborted_by_user");
+    expect(db().audit.at(-1)).toMatchObject({
+      action: "run_finished",
+      detail: { status: "aborted", failureReason: "aborted_by_user" },
+    });
+  });
+
 });
