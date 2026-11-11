@@ -18,3 +18,4 @@ One file per decision that was not obvious and would otherwise be re-litigated. 
 | [011](011-a-run-records-the-end-of-its-collection.md) | A run records the end of its own collection, and views read it instead of a clock | Accepted |
 | [012](012-the-platform-names-no-provider.md) | The platform names no provider: five Terraform implementations behind one contract, on machines rather than managed services | Accepted |
 | [013](013-one-run-at-a-time-per-script-vm.md) | One run at a time per script VM, admitted by the control plane rather than by the runner | Accepted |
+| [014](014-a-transcript-expires-the-record-does-not.md) | Terminal transcripts expire after 90 days; run records and the audit trail do not | Accepted |
