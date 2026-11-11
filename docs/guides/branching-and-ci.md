@@ -36,21 +36,39 @@ hashes. (A local `git rebase` onto its own ancestor *is* an identity — which i
 counter-intuitive — but GitHub's is not.)
 
 So a pull request from `dev` into a release branch is not a fast-forward and not a small diff: it
-is everything since that stale merge base. By the second promotion it conflicts, and GitHub then
-will not run the workflows at all — it cannot build a merge commit — so the pull request reports
-*no checks* instead of a conflict, which reads as a workflow problem and is not one.
+is everything since that stale merge base — 56 commits, the last time it was measured. A second
+rule stops it even earlier than that: the required checks are **strict**, so the head branch has
+to contain the base branch's tip, and `dev` does not contain `staging`'s alignment commit. A
+plain pull request from `dev` therefore opens as **BEHIND** while the content of the two branches
+is byte-identical — the part of this that reads as a mistake and is not one. Measured rather than
+reasoned: `gh pr create --base staging --head dev` between the two aligned branches reports
+`mergeStateStatus: BEHIND`, `mergeable: MERGEABLE`.
+
+By the second promotion the rebase merge conflicts, and GitHub then will not run the workflows at
+all — it cannot build a merge commit — so the pull request reports *no checks* instead of a
+conflict, which reads as a workflow problem and is not one.
 
 A promotion therefore goes through an **alignment branch**: cut from the release branch, with its
-tree set to `dev`'s. The pull request's diff is then exactly the work being promoted.
+tree set to `dev`'s. The head then contains the base's tip by construction, so `strict` is
+satisfied, and the pull request's diff is exactly the work being promoted.
 
     git switch -c align-staging origin/staging
     git read-tree -u --reset origin/dev
     git commit -m "chore: align <branch> with dev"
 
-Making a promotion a plain pull request from `dev` — a real fast-forward — needs the release
-branches to accept a merge commit or a local push, and both protections (`required_linear_history`
-and `allow_force_pushes`) say no. That is a decision for whoever owns the protections; until it is
-taken, an alignment branch is the shape that works, and it is why one appears in the history.
+Making a promotion a plain pull request from `dev` looks like two settings away. It is not, and
+that is worth writing down because it is the obvious first idea. Turning on `allow_merge_commit`
+at the repository and `required_linear_history` off on `staging` and `main` does make the *next*
+promotion an ordinary pull request — and it lands as a merge commit on the release branch, a
+commit that exists on no other branch. `strict` then requires the following pull request's head
+branch, `dev`, to contain that commit, and the only way `dev` acquires it is a merge commit on
+`dev`, which `dev`'s own `required_linear_history` forbids. So the promotion *after* the first one
+is blocked unless `dev`'s linear history goes too: not a toggle, a different branching model. The
+same applies to any commit a release branch holds that `dev` does not — a hotfix landed directly
+on `staging` blocks the next promotion for exactly this reason.
+
+The alignment commit is therefore not a workaround for a missing setting. It is what makes
+`strict` satisfiable at all.
 
 ## Topic branches
 
@@ -125,6 +143,43 @@ Set on `dev`, `staging` and `main`, requiring these checks by exact name:
 - `Schema & migrations`
 
 Plus: a pull request before merging, and branches up to date before merge.
+
+All three carry the same settings, and there are more of them than the sentence above says. What
+is on the branches — read back rather than recalled:
+
+    gh api repos/<owner>/<repo>/branches/<branch>/protection --jq '{
+      checks: .required_status_checks.checks,
+      strict: .required_status_checks.strict,
+      linear: .required_linear_history.enabled,
+      force_pushes: .allow_force_pushes.enabled,
+      admins: .enforce_admins.enabled,
+      reviews: .required_pull_request_reviews.required_approving_review_count,
+      conversations: .required_conversation_resolution.enabled }'
+
+`checks` rather than `contexts`: both are in the response, but only the former carries the
+`app_id` that says *who* reports a check, which is what the table below asserts and what would
+change if a check were ever reported by something other than Actions.
+
+| Setting | `dev` | `staging` | `main` | What it does here |
+|---|---|---|---|---|
+| Required checks | the four above, `app_id` 15368 | same | same | Actions reports them, so a check that stops being reported blocks rather than passes. |
+| `strict` | on | on | on | The head branch has to contain the base's tip. This is what makes the alignment branch necessary in the first place, and it is why a plain pull request from `dev` opens as *behind* — [above](#a-promotion-carries-an-alignment-commit-and-here-is-why). |
+| `required_linear_history` | on | on | on | No merge commit may land on the branch. |
+| `allow_force_pushes` | off | off | off | The release branch cannot be moved back onto `dev`. |
+| `required_approving_review_count` | 0 | 0 | 0 | The pull request is required; a review is not. A one-person repository that required an approval would require it from nobody. |
+| `required_conversation_resolution` | on | on | on | An unresolved review comment blocks the merge, including a bot's. |
+| `enforce_admins` | on | on | on | Admins are bound too. Without this, the two settings above would be advice. |
+
+### Making a promotion a plain pull request
+
+It looks like two settings and it is not: the first promotion would land as a merge commit on the
+release branch and block the second one, for the reasons worked through
+[above](#a-promotion-carries-an-alignment-commit-and-here-is-why). The two settings, for the
+record, are `allow_merge_commit` at the repository
+(`gh api -X PATCH repos/<owner>/<repo> -F allow_merge_commit=true`) and `required_linear_history`
+off on `staging` and `main`. Turning them over is a decision for whoever owns the protections —
+and a decision to change the branching model, not a toggle to flip: `dev`'s own linear history,
+or `strict`, has to go with them.
 
 `Architecture model` is deliberately **not** required — it skips its own steps
 when the model has not changed, and a skipped check that is required blocks
