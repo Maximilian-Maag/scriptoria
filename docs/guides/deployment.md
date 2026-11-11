@@ -148,8 +148,16 @@ constant (see the branch guide); unset, that job builds and publishes nothing. T
 never published**: its terminal address is compiled in at build time, so it is built per
 environment, here:
 
-    make deploy-images                    # on the build machine: build, then one tarball
+    # on the build machine: build, then one tarball — with *this environment's* terminal address,
+    # because the frontend bundle has it compiled in and no runtime setting can change it
+    make deploy-images TERMINAL_WS_URL=wss://<this environment's host>/terminal
     infra/deploy/scripts/load-images.sh scriptoria-images.tar    # on each host
+
+Passing `TERMINAL_WS_URL` is not optional in anything but the dev default: `make deploy-images`
+builds the frontend with `NEXT_PUBLIC_TERMINAL_WS_URL` as a **build argument**, and the Dockerfile
+compiles it into the bundle. Build without it and the tarball's frontend is an image whose terminal
+sockets go to `ws://localhost:3001` — which a browser on that host will fail to reach, and which no
+restart repairs, because the address is in the JavaScript.
 
 The tarball carries the three platform images and the three the data and directory instances run.
 Nothing is pulled on a provisioned host: NFR-01 puts these networks in a position where there is no

@@ -45,14 +45,24 @@ jobs:
 
       # Says which of the two shapes this run is, before it does anything: an operator reading
       # the log of a release that published nothing should not have to infer why.
+      #
+      # It also derives the branch tag *once*, here, and every later step uses it — tagging,
+      # reading the manifest back, the summary. `GITHUB_REF_NAME` is whatever was dispatched,
+      # and a `workflow_dispatch` run can be on any branch: a branch name may contain `/` and a
+      # Docker tag may not, so `feat/thing` publishes as `feat-thing`. That can collide with a
+      # branch literally called `feat-thing`, which is exactly why each image also carries its
+      # commit — the commit tag is the one that means one thing.
       - name: Where this release goes
         env:
           REGISTRY: ${{ vars.REGISTRY }}
         run: |
+          set -eu
+          tag="$(printf '%s' "${GITHUB_REF_NAME}" | tr '/' '-')"
+          printf 'TAG=%s\nSHORT_SHA=%s\n' "${tag}" "${GITHUB_SHA:0:12}" >> "${GITHUB_ENV}"
           if [ -z "${REGISTRY}" ]; then
             echo "::notice::No registry is configured, so the images are built and not published. Set the repository variable REGISTRY and the secrets REGISTRY_USERNAME and REGISTRY_PASSWORD to publish."
           else
-            echo "publishing to ${REGISTRY} as ${GITHUB_REF_NAME} and ${GITHUB_SHA:0:12}"
+            echo "publishing to ${REGISTRY} as ${tag} and ${GITHUB_SHA:0:12}"
           fi
 
       # All three Dockerfiles, because this is the only job that builds them: the frontend too,
@@ -77,7 +87,7 @@ jobs:
         run: |
           set -eu
           for image in backend runner; do
-            for tag in "${GITHUB_REF_NAME}" "${GITHUB_SHA:0:12}"; do
+            for tag in "${TAG}" "${SHORT_SHA}"; do
               docker tag "scriptoria-${image}:latest" "${REGISTRY}/scriptoria-${image}:${tag}"
               docker push "${REGISTRY}/scriptoria-${image}:${tag}"
             done
@@ -86,11 +96,11 @@ jobs:
           # for the manifest, so "published" is read back rather than claimed — the tag is
           # what an environment will pull, and a typo in it fails here rather than at 3am.
           for image in backend runner; do
-            docker manifest inspect "${REGISTRY}/scriptoria-${image}:${GITHUB_REF_NAME}" > /dev/null
+            docker manifest inspect "${REGISTRY}/scriptoria-${image}:${TAG}" > /dev/null
           done
           {
             echo "### Published"
             for image in backend runner; do
-              echo "- \`${REGISTRY}/scriptoria-${image}:${GITHUB_REF_NAME}\` and \`:${GITHUB_SHA:0:12}\`"
+              echo "- \`${REGISTRY}/scriptoria-${image}:${TAG}\` and \`:${SHORT_SHA}\`"
             done
           } >> "${GITHUB_STEP_SUMMARY}"
