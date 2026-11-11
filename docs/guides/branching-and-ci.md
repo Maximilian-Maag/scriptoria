@@ -122,7 +122,7 @@ protections are what make that safe — not the workflow file.
 
 | Check | What it does | Why it is its own job |
 |---|---|---|
-| **Type-check & Lint** | `make type-check`, `make lint` | Both halves share an install and take seconds. Splitting them would double the setup cost to parallelise ninety seconds. |
+| **Type-check & Lint** | `make type-check`, `make lint`, `make env-check` | They share an install and take seconds; splitting them would double the setup cost to parallelise ninety seconds. `env-check` is here rather than in its own job because a *new* required check gates nothing until it is added to both protections, and what it protects takes a second: every setting `packages/config` reads appears in both `.env` examples. |
 | **Test** | One leg per package: `@scriptoria/*`, runner, frontend — and the backend in its own job, with a Postgres service | A slow suite stops being every suite's problem, and a red frontend does not hide a red runner. The backend is separate because it is the only one needing a service: its authorisation tests run against a real database, since the bug worth catching is a `where` clause that stopped filtering. |
 | **Build** | `make build` | Catches what type-checking cannot: both web tiers are Next.js applications whose routes are collected and compiled at build time. |
 | **Schema & migrations** | `make db-migrate`, `make db-check`, `make db-seed` against a Postgres service container | `schema.ts` and `drizzle/*.sql` are two descriptions of one database and nothing else compares them. They drifted once: a database built by `make db-migrate` had the directory-group columns under their old names, so it could be neither seeded nor logged into, and only a login attempt found out (#24). |
@@ -225,11 +225,32 @@ three branches carry `ci.yml` after the first promotion, but a branch cut from a
 release branch before that promotion has no checks to report, and a required
 check that is never reported blocks the pull request rather than failing it.
 
-## What is not here yet
+## What a release does
 
-There is **no CD workflow**, and that is a gap rather than a decision. The
-sibling repository releases a container image per branch — `dev`, `staging`,
-`latest` — and Scriptoria now could: `apps/*/Dockerfile` exists for all three
-processes and `make docker-build` builds them. What is missing is the decision
-nobody has made yet — which registry the images go to, and what credential the
-workflow uses to push them.
+`.github/workflows/release.yml` runs on a push to `staging` or `main` (and on demand). It builds
+all three images from that commit and, **if a registry is configured**, publishes the two that are
+environment-independent — `scriptoria-backend` and `scriptoria-runner` — tagged with the branch and
+with the commit.
+
+The destination is a decision rather than a constant: one repository **variable** and two
+**secrets**, so nothing in the repository has to change when it is taken.
+
+    settings → variables:  REGISTRY              e.g. ghcr.io/<owner>, registry.example.internal:5000
+    settings → secrets:    REGISTRY_USERNAME
+                           REGISTRY_PASSWORD
+
+Unset, the run says so in its log and builds anyway — which is the honest state of a pipeline whose
+destination is undecided, and still the only place in CI that builds the Dockerfiles.
+
+**The frontend is not published, and that is not an oversight.** Its terminal WebSocket address is
+compiled into the bundle at build time (ADR-007, `apps/frontend/Dockerfile`), so it differs per
+environment and is built at deploy time from that environment's own address. A per-branch frontend
+image would be an image whose WebSocket points somewhere wrong.
+
+Nothing here replaces the tarball: NFR-01 puts every provisioned environment in a network with no
+route out, so what a host actually receives is `make deploy-images`' tarball, carried in and loaded
+with `load-images.sh`. A registry is for the machines that do have a route.
+
+The workflow has never pushed to a real registry — no run has had one configured. What closes that
+is setting the three values and running it once (`gh workflow run release.yml`); until then the
+claim is "the build is exercised on every release", not "the release is automated".
