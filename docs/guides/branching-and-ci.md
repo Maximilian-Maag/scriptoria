@@ -251,6 +251,28 @@ Nothing here replaces the tarball: NFR-01 puts every provisioned environment in 
 route out, so what a host actually receives is `make deploy-images`' tarball, carried in and loaded
 with `load-images.sh`. A registry is for the machines that do have a route.
 
-The workflow has never pushed to a real registry — no run has had one configured. What closes that
-is setting the three values and running it once (`gh workflow run release.yml`); until then the
-claim is "the build is exercised on every release", not "the release is automated".
+**What has been run, and what has not.** No run has published to an *external* registry — no run has
+had `REGISTRY` set. The job's own steps have been executed against a real one, though: a
+`registry:2` on `localhost:5000`, plain HTTP, with `GITHUB_REF_NAME`, `GITHUB_SHA`, `GITHUB_ENV` and
+`GITHUB_STEP_SUMMARY` set as the runner sets them. That published `scriptoria-backend` and
+`scriptoria-runner` under both tags for `main` and for a slashed branch (`feat/thing` →
+`feat-thing`), read both manifests back, and wrote the summary — and the registry's `_catalog`
+afterwards held exactly those two repositories, which is the frontend's absence as a fact rather
+than a promise.
+
+That run also found a real defect, which is why it was worth doing: `docker manifest inspect` does
+not read the daemon's `insecure-registries`, so against a registry served over plain HTTP — the
+likely shape inside a network with no route out — it answers `no such manifest` for a tag that was
+pushed a second earlier. The read-back now retries with `--insecure` and fails the job with a named
+error if both attempts fail.
+
+What is left unverified is therefore narrow: the credentialed login to an external registry and its
+TLS path. `gh workflow run release.yml` with the three values set closes it; until then the honest
+claim is "the build is exercised and the publish path is proven against a local registry", not "the
+release is automated against ours".
+
+To repeat the check:
+
+    docker run -d --rm -p 5000:5000 --name registry-test registry:2
+    REGISTRY=localhost:5000 GITHUB_REF_NAME=main GITHUB_SHA=$(git rev-parse HEAD) make docker-build
+    # then run the job's "Where this release goes" and "Push" steps with that environment
