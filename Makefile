@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-down dev-logs ports run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed ladder docker-build docker-build-frontend docker-build-backend docker-build-runner deploy-images deploy-check deploy-check-shell deploy-check-env deploy-check-tests deploy-check-units deploy-check-nginx deploy-check-terraform diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
+.PHONY: help install dev dev-down dev-logs ports run run-frontend run-backend run-runner build lint type-check env-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed ladder docker-build docker-build-frontend docker-build-backend docker-build-runner deploy-images deploy-check deploy-check-shell deploy-check-env deploy-check-tests deploy-check-units deploy-check-nginx deploy-check-terraform diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
 
 # pnpm is installed via the standalone script — add its bin dir to PATH so make can find it
 PNPM_HOME ?= $(HOME)/.local/share/pnpm
@@ -51,6 +51,7 @@ help:
 	@echo "  build                 build all workspace packages"
 	@echo "  lint                  lint all apps and packages"
 	@echo "  type-check            TypeScript type-check everything"
+	@echo "  env-check             fail if a config setting is missing from an example .env file"
 	@echo "  test                  run unit and integration tests (the backend leg needs the dev stack)"
 	@echo "  test-e2e              run the Playwright end-to-end suite (needs a live stack: make dev)"
 	@echo "                        E2E_SPECS=tests/05-stop.spec.ts runs one requirement's specs"
@@ -118,6 +119,15 @@ lint:
 
 type-check:
 	$(PNPM) --parallel --filter './apps/*' --filter './packages/*' --filter e2e exec tsc --noEmit
+
+# ── The settings, against the files that describe them ────────────────────────
+# `packages/config` is the one description of what the processes read, and the two
+# `.env` examples are the description an operator works from. They have no compiler
+# between them: a key added to a schema and not to the examples is a setting nobody can
+# find, and the code has a default, so nothing breaks and nobody notices. This compares
+# them, in the same spirit as `db-check` comparing the schema with the migrations.
+env-check:
+	$(PNPM) --filter @scriptoria/config check:env-example
 
 test:
 	$(PNPM) --filter backend test

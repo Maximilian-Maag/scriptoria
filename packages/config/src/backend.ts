@@ -64,8 +64,6 @@ export const backendSchema = sharedSchema
   .merge(sessionSchema)
   .extend({
     BACKEND_PORT: intFromEnv({ min: 1, max: 65_535 }).default(3001),
-    /** Where the frontend's proxy and the browser's WebSocket both arrive. */
-    BACKEND_PUBLIC_ORIGIN: z.string().url().default("http://localhost:3001"),
 
     /**
      * Script metadata is read off the script VM and cached (ADR-004). Short,

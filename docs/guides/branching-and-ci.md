@@ -122,7 +122,7 @@ protections are what make that safe — not the workflow file.
 
 | Check | What it does | Why it is its own job |
 |---|---|---|
-| **Type-check & Lint** | `make type-check`, `make lint` | Both halves share an install and take seconds. Splitting them would double the setup cost to parallelise ninety seconds. |
+| **Type-check & Lint** | `make type-check`, `make lint`, `make env-check` | They share an install and take seconds; splitting them would double the setup cost to parallelise ninety seconds. `env-check` is here rather than in its own job because a *new* required check gates nothing until it is added to both protections, and what it protects takes a second: every setting `packages/config` reads appears in both `.env` examples. |
 | **Test** | One leg per package: `@scriptoria/*`, runner, frontend — and the backend in its own job, with a Postgres service | A slow suite stops being every suite's problem, and a red frontend does not hide a red runner. The backend is separate because it is the only one needing a service: its authorisation tests run against a real database, since the bug worth catching is a `where` clause that stopped filtering. |
 | **Build** | `make build` | Catches what type-checking cannot: both web tiers are Next.js applications whose routes are collected and compiled at build time. |
 | **Schema & migrations** | `make db-migrate`, `make db-check`, `make db-seed` against a Postgres service container | `schema.ts` and `drizzle/*.sql` are two descriptions of one database and nothing else compares them. They drifted once: a database built by `make db-migrate` had the directory-group columns under their old names, so it could be neither seeded nor logged into, and only a login attempt found out (#24). |

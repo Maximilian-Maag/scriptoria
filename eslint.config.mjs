@@ -50,6 +50,7 @@ export default tseslint.config(
       "**/seed.ts",
       "**/migrate.ts",
       "**/checkSchemaDrift.ts",
+      "**/checkEnvExample.ts",
       "**/drizzle.config.ts",
     ],
     // These run in Node rather than in a browser or a bundle, so `process` is
