@@ -16,6 +16,7 @@
   "reporters": ["clear-text", "json"],
   "jsonReporter": { "fileName": "/tmp/stryker-core.json" },
   "coverageAnalysis": "perTest",
+  "coverageAnalysis_comment": "perTest cannot attribute module-level mutants (regexes, tables, const arrow functions) to the test that runs them, so a handful are reported as survivors that the suite actually kills — measured by hand: with `normalise` in authorization.ts replaced by the identity, two tests fail. Read the survivors in those files as hints, not as untested paths; `ignoreStatic` would hide them from the number instead of from the report, which is worse.",
   "concurrency": 4,
   "timeoutMS": 30000,
   "thresholds": {

@@ -8,8 +8,21 @@
 # `--pull=never` for the same reason, so a missing image fails immediately instead
 # of spending a timeout on a registry that is not reachable.
 #
-#   make deploy-images          # on the build machine: build, then save to a tarball
+#   make deploy-images TERMINAL_WS_URL=wss://<this environment's host>
+#                               # on the build machine: build, then save to a tarball
 #   ./load-images.sh scriptoria-images.tar
+#
+# The tarball must be readable by the account the containers run as (scriptoria, or
+# $SCRIPTORIA_USER): the load is unprivileged, so a tarball left in /root loads
+# nothing. The script checks that first and says so.
+#
+# That build argument is not optional. The frontend compiles the terminal's WebSocket
+# address into its bundle (ADR-007), so a tarball built without it ships a frontend whose
+# terminal sockets go to `ws://localhost:3001` — and no restart, env file or unit
+# override on the host can repair it, because the address is in the JavaScript.
+#
+# The host WITHOUT a path: the client appends `/terminal` itself, so an address ending in
+# `/terminal` becomes `.../terminal/terminal` and the socket never opens.
 #
 # Loading is additive: it replaces an image of the same tag and leaves the ones it
 # does not mention. Rolling back is loading the previous tarball.
@@ -27,6 +40,16 @@ fi
 }
 
 user="${SCRIPTORIA_USER:-scriptoria}"
+
+# Checked as that account, before anything is loaded, because this is the failure
+# that costs the most time: a tarball copied in as root (to /root, 0600) loads
+# nothing, and podman's own message for it names a path the operator just proved
+# exists. Reading it as `$user` is the same test the load will make.
+if ! runuser -u "$user" -- test -r "$tarball"; then
+    echo "the tarball must be readable by '$user': it is loaded as that account, not as root" >&2
+    echo "  move it, or: install -m 0644 -o $user '$tarball' /var/tmp/$(basename "$tarball")" >&2
+    exit 1
+fi
 
 # The load itself is unprivileged, and has to be: the images end up in the store of
 # the user whose containers will run them, and an image loaded as root would simply
