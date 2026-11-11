@@ -141,6 +141,13 @@ browser JavaScript.
 
 ## A release
 
+A push to `staging` or `main` runs `.github/workflows/release.yml`, which builds all three images
+and — where a registry is configured — publishes `scriptoria-backend` and `scriptoria-runner` tagged
+with the branch and the commit. The registry is a repository variable plus two secrets, not a
+constant (see the branch guide); unset, that job builds and publishes nothing. The **frontend is
+never published**: its terminal address is compiled in at build time, so it is built per
+environment, here:
+
     make deploy-images                    # on the build machine: build, then one tarball
     infra/deploy/scripts/load-images.sh scriptoria-images.tar    # on each host
 
