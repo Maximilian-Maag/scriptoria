@@ -71,6 +71,14 @@ describe("scheduleId", () => {
     expect(scheduleId("src-2", command)).toBe("20e27325");
   });
 
+  it("is always eight characters, so an id is an id and not a number", () => {
+    // This input hashes low enough that the zero padding is load-bearing: without
+    // it the id would be seven characters, and anything comparing ids as fixed
+    // width — a column, a log line, a test — would be comparing two shapes.
+    expect(scheduleId("vm-b", "/opt/scriptoria/scripts/a")).toBe("0c6cc4e3");
+    expect(scheduleId("vm-b", "/opt/scriptoria/scripts/a")).toHaveLength(8);
+  });
+
   it("ignores whitespace around the command, because a crontab line is not typed by hand", () => {
     const command = "/opt/scriptoria/scripts/inventory-report.sh";
     expect(scheduleId("src-1", `  ${command}\t`)).toBe(scheduleId("src-1", command));

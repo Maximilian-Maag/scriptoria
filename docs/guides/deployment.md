@@ -150,7 +150,7 @@ environment, here:
 
     # on the build machine: build, then one tarball — with *this environment's* terminal address,
     # because the frontend bundle has it compiled in and no runtime setting can change it
-    make deploy-images TERMINAL_WS_URL=wss://<this environment's host>/terminal
+    make deploy-images TERMINAL_WS_URL=wss://<this environment's host>
     infra/deploy/scripts/load-images.sh scriptoria-images.tar    # on each host
 
 Passing `TERMINAL_WS_URL` is not optional in anything but the dev default: `make deploy-images`
@@ -158,6 +158,10 @@ builds the frontend with `NEXT_PUBLIC_TERMINAL_WS_URL` as a **build argument**, 
 compiles it into the bundle. Build without it and the tarball's frontend is an image whose terminal
 sockets go to `ws://localhost:3001` — which a browser on that host will fail to reach, and which no
 restart repairs, because the address is in the JavaScript.
+
+Give the **host, without a path**: the client appends `/terminal` itself
+(`useTerminalStream.ts` opens `${WS_BASE}/terminal`), so an address that already ends in `/terminal`
+becomes `…/terminal/terminal` and the socket never opens.
 
 The tarball carries the three platform images and the three the data and directory instances run.
 Nothing is pulled on a provisioned host: NFR-01 puts these networks in a position where there is no
@@ -205,6 +209,23 @@ with the tools they already have. It is the only part of this that cannot be aut
       --entrypoint /bin/sh postgres:16-alpine -c \
       'pg_restore --clean --if-exists --no-owner --dbname="$DATABASE_URL" /backups/<file>.dump'
     sudo systemctl start 'scriptoria-backend@1' scriptoria-frontend
+
+Run against a database the end-to-end suite had filled rather than a freshly migrated one — 117
+runs, 907 events, 116 transcripts, 249 result files, 875 audit entries — the command above gave
+`pg_restore` **exit 0, no errors, no warnings**, and every table's contents were identical by md5.
+A restore that works is silent; the seconds between stopping the control plane and starting it
+again are the only thing to watch.
+
+**Keep the client's major version equal to the server's.** The restore image and the one
+`scriptoria-backup.service` dumps with are both `postgres:16-alpine`, and that is a requirement
+rather than a habit: `pg_dump` from a *newer* client writes `SET transaction_timeout = 0;`, which is
+a PostgreSQL 17 setting, and a 16 server rejects it. `pg_restore` then answers
+
+    pg_restore: error: could not execute query: ERROR:  unrecognized configuration parameter "transaction_timeout"
+    pg_restore: warning: errors ignored on restore: 1
+
+and exits **1** — on a restore that otherwise completed. Upgrade the image, the dump and the restore
+together, or not at all.
 
 ## What is checked, and where
 

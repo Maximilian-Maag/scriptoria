@@ -34,6 +34,11 @@ describe("chooseAdmissions", () => {
     expect(chooseAdmissions(queued("vm-a"), new Map([["vm-a", 4]]), 1, 10)).toEqual([]);
   });
 
+  it("admits exactly one run when the batch is one", () => {
+    // The smallest honest sweep: one free VM, one run per pass.
+    expect(chooseAdmissions(queued("vm-a", "vm-b"), new Map(), 1, 1)).toEqual(["run-1"]);
+  });
+
   it("admits nothing when the limit or the batch is zero", () => {
     // A misconfigured sweep (a limit of 0) must quiet the platform, not open it.
     expect(chooseAdmissions(queued("vm-a"), new Map(), 0, 10)).toEqual([]);

@@ -286,10 +286,22 @@ make type-check         # every workspace package
 make lint
 make test
 make build
+make env-check          # every setting the code reads is in both .env examples
 ```
 
-All four go through the Makefile precisely so that CI and your machine cannot
-disagree about what they mean. The full picture, including why `Test` is an
+All five go through the Makefile precisely so that CI and your machine cannot
+disagree about what they mean.
+
+Two more checks are worth knowing about, neither of them in CI:
+
+```bash
+make mutation           # what the core tests would notice: Stryker on packages/core
+make deploy-check       # the deployment layer — units, nginx, env, Terraform
+```
+
+`mutation` is deliberately local: a full run is about a minute of CPU, and the number means most on
+the pull request that changes a `packages/core` module ([why](docs/guides/branching-and-ci.md)).
+`deploy-check` runs in its own CI job as well, and needs Docker. The full picture, including why `Test` is an
 aggregating job and why the build needs no environment, is in
 [`docs/guides/branching-and-ci.md`](docs/guides/branching-and-ci.md).
 

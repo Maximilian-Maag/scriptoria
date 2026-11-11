@@ -54,6 +54,12 @@ describe("resolveAreaIds", () => {
     expect(resolveAreaIds(["SCRIPTORIA-Firewall"], entitlements)).toEqual(["area-firewall"]);
   });
 
+  it("matches despite whitespace the directory adds around a name", () => {
+    // Same failure, quieter: " netops " and "netops" are one group, and an
+    // entitlement that stops matching is an administrator with no areas.
+    expect(resolveAreaIds(["  SCRIPTORIA-Firewall  "], entitlements)).toEqual(["area-firewall"]);
+  });
+
   it("returns an empty set for an account in no mapped group — a valid outcome", () => {
     // FA-01.4. admin.none exists in the directory fixture for exactly this case.
     expect(resolveAreaIds(["scriptoria-unmapped"], entitlements)).toEqual([]);

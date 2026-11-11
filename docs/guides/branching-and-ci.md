@@ -146,9 +146,18 @@ mutant nothing notices is a case nothing tests, and it is named by file and line
 
 It is deliberately **not** a CI job. A full run is about a minute of CPU that every pull request
 would pay for a package most pull requests do not touch, and the number means most on the pull
-request that is changing a core module. Run it there. The first run scored 75.44%, named four
-untested tables and a YAML result that could not be previewed, and `thresholds.break` in
-`packages/core/stryker.conf.json` now fails a run that falls below 85.
+request that is changing a core module. Run it there.
+
+The first run scored **75.44%** and named four untested tables and a YAML result that could not be
+previewed; the suite is now at **89.16%**, every module above 80%, and
+`thresholds.break` in `packages/core/stryker.conf.json` fails a run that falls below 85.
+
+Read the survivors with one caveat, which the config states too: with `coverageAnalysis: perTest`,
+Stryker cannot attribute module-level mutants — a regex constant, a lookup table, a `const arrow` —
+to the test that exercises them, so a few are reported as survivors that the suite does kill.
+Verified the slow way on the one that mattered: replacing `normalise` in `authorization.ts` with the
+identity fails two tests. `ignoreStatic` would remove those from the number rather than from the
+report, which is the wrong way to make a score look better.
 
 Two files are out of scope and say so: `crontab.ts` and `scriptReference.ts`, whose tests read
 artefacts from the repository root that Stryker's sandbox does not copy.
