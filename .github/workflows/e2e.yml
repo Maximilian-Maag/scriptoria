@@ -139,10 +139,12 @@ jobs:
             if pnpm --filter e2e exec playwright install --with-deps chromium; then
               exit 0
             fi
-            echo "::warning::the browser did not install (attempt ${attempt}/3) — retrying in $((attempt * 20))s"
-            sleep $((attempt * 20))
+            if [ "${attempt}" -lt 3 ]; then
+              echo "::warning::the browser did not install (attempt ${attempt}/3) — retrying in $((attempt * 20))s"
+              sleep $((attempt * 20))
+            fi
           done
-          echo "::error::the browser never installed, so nothing below this step ran: this is the runner's package mirrors, not the change under test"
+          echo "::error::the browser never installed, so no test ran. The output above says which half failed: the apt-get for Chromium's libraries, the browser download, or the workspace it was run in."
           exit 1
 
       # Through the Makefile, exactly as a developer runs it, so CI and a
