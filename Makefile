@@ -339,6 +339,8 @@ deploy-check-nginx:
 	  --volume "$$tmp:/etc/scriptoria/tls:ro" \
 	  $(NGINX_IMAGE) -t 2>&1; \
 	echo "  nginx accepts the proxy configuration"
+	@RUNTIME=$(RUNTIME) NGINX_IMAGE=$(NGINX_IMAGE) $(DEPLOY_DIR)/nginx/nginx.test.sh > /dev/null \
+	  && echo "  the proxy's routing reaches the control plane, and nothing else does"
 
 # Terraform: the five implementations that create the hosts. `validate` is as far
 # as any of this can go without an account — it checks the code against the

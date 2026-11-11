@@ -139,8 +139,9 @@ WebSocket straight to the control plane, and publishes the control plane's healt
 published: the browser's REST surface is the frontend, which is what keeps session material out of
 browser JavaScript.
 
-That configuration is exercised as well as parsed: this file run in an `nginx` container on the host
-network, in front of a running control plane and frontend, answers
+That configuration is exercised as well as parsed — `infra/deploy/nginx/nginx.test.sh`, run by
+`make deploy-check` and by CI with it. This file, in an `nginx` container on the host network, in
+front of stubs that answer with their own port:
 
     http://localhost/            -> 301 to https
     https://localhost/           -> 200, text/html                    (the frontend)
@@ -148,7 +149,8 @@ network, in front of a running control plane and frontend, answers
     /terminal, WebSocket upgrade -> 401 from the control plane        (the upgrade reached it)
     any other path               -> the frontend, never the control plane
 
-`nginx -t` proves the file parses; those five lines are what prove the routing.
+`nginx -t` proves the file parses; those five lines are what prove the routing, and the script that
+asserts them runs on every `deploy-check`.
 
 **A WebSocket test has to say `--http1.1`.** The same port serves HTTP/2 and HTTP/1.1, and a browser
 opens a WebSocket over HTTP/1.1 — but `curl` negotiates h2 by default, and nginx does not translate
@@ -260,7 +262,10 @@ configuration" job:
 - `app.env.example` satisfies the deployment's rules, and the rules refuse what they claim to;
 - every unit passes `systemd-analyze verify` (a missing `podman` binary is a fact about the machine
   running the check, not about the unit, and is filtered);
-- `nginx -t` accepts the proxy configuration — the same parser the proxy itself runs;
+- `nginx -t` accepts the proxy configuration — the same parser the proxy itself runs — and then the
+  routing is exercised: the file in a container in front of two stubs, asserting that `/terminal`
+  reaches the control plane, that `/healthz` is rewritten onto `/api/health`, that the site and every
+  other path stay on the frontend, and that the plain listener only redirects;
 - each of the five Terraform implementations validates against its provider's real schema, the five
   still declare the same contract, and the cloud-init document renders with every file of this
   deployment layer in it.
