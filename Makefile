@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-down dev-logs ports run run-frontend run-backend run-runner build lint type-check env-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed ladder docker-build docker-build-frontend docker-build-backend docker-build-runner deploy-images deploy-check deploy-check-shell deploy-check-env deploy-check-tests deploy-check-units deploy-check-nginx deploy-check-terraform diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
+.PHONY: help install dev dev-down dev-logs ports run run-frontend run-backend run-runner build lint type-check env-check test test-e2e test-db mutation test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed ladder docker-build docker-build-frontend docker-build-backend docker-build-runner deploy-images deploy-check deploy-check-shell deploy-check-env deploy-check-tests deploy-check-units deploy-check-nginx deploy-check-terraform diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
 
 # pnpm is installed via the standalone script — add its bin dir to PATH so make can find it
 PNPM_HOME ?= $(HOME)/.local/share/pnpm
@@ -52,6 +52,7 @@ help:
 	@echo "  lint                  lint all apps and packages"
 	@echo "  type-check            TypeScript type-check everything"
 	@echo "  env-check             fail if a config setting is missing from an example .env file"
+	@echo "  mutation              mutation-test packages/core, and fail below the threshold"
 	@echo "  test                  run unit and integration tests (the backend leg needs the dev stack)"
 	@echo "  test-e2e              run the Playwright end-to-end suite (needs a live stack: make dev)"
 	@echo "                        E2E_SPECS=tests/05-stop.spec.ts runs one requirement's specs"
@@ -128,6 +129,17 @@ type-check:
 # them, in the same spirit as `db-check` comparing the schema with the migrations.
 env-check:
 	$(PNPM) --filter @scriptoria/config check:env-example
+
+# ── What the tests would notice ───────────────────────────────────────────────
+# A green suite says the tests ran, not that they would fail if the code were
+# wrong. `packages/core` is where that is cheap to answer: pure functions, no
+# database, no browser. Stryker rewrites the source one change at a time and asks
+# the suite which changes it notices; a mutant nothing notices is a case nothing
+# tests. Not in CI — a full run is a minute of CPU that every pull request would
+# pay — so it is a check to run before touching a core module, with a threshold
+# that fails the run rather than reporting a number into the void.
+mutation:
+	$(PNPM) --filter @scriptoria/core mutation
 
 test:
 	$(PNPM) --filter backend test

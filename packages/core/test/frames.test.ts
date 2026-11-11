@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { STREAM_FRAME } from "@scriptoria/contracts";
 import {
   FrameError,
   decodeTerminalFrame,
@@ -52,6 +53,22 @@ describe("terminal frames", () => {
     const frame = encodeTerminalFrame("1-0", new Uint8Array([1]));
     frame[0] = 0x7f;
     expect(() => decodeTerminalFrame(frame)).toThrow(FrameError);
+  });
+
+  it("treats a frame of exactly header size as having no stream id in it", () => {
+    // Three bytes is the header: an id length that claims more is truncated, and
+    // that is a different refusal from "shorter than its header".
+    const frame = new Uint8Array(3);
+    frame[0] = STREAM_FRAME.DATA;
+    new DataView(frame.buffer).setUint16(1, 5, false);
+    expect(() => decodeTerminalFrame(frame)).toThrow(/truncated stream id/);
+  });
+
+  it("refuses a stream id that cannot be described in the header's two bytes", () => {
+    expect(() => encodeTerminalFrame("x".repeat(0x10000), new Uint8Array())).toThrow(
+      /stream id too long/,
+    );
+    expect(() => encodeTerminalFrame("x".repeat(0xffff), new Uint8Array())).not.toThrow();
   });
 
   it("rejects a truncated stream id", () => {
