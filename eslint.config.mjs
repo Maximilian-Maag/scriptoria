@@ -15,6 +15,9 @@ export default tseslint.config(
       "**/drizzle/meta/**",
       "**/playwright-report/**",
       "**/test-results/**",
+      // Stryker's sandbox: a rewritten copy of the package, including the
+      // @ts-nocheck header it injects. It is not source and must not be linted.
+      "**/.stryker-tmp/**",
       ".diagrams/**",
       "docs/architecture/diagrams/**",
     ],

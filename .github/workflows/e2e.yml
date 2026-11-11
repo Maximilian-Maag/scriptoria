@@ -124,8 +124,28 @@ jobs:
 
       # --with-deps because a fresh runner has none of Chromium's own libraries.
       # It is idempotent, so a restored cache still passes through here.
+      #
+      # Retried, because the dependency half of it is an `apt-get` against an
+      # Ubuntu mirror: when that mirror is briefly unreachable every job in this
+      # workflow dies here, before a single assertion, and the red check reads
+      # like the product is broken. Measured: three runs of one pull request
+      # failed this way over 50 minutes, and the same suite passed in full
+      # locally. Three attempts convert a blip into a slower green; a real
+      # outage still fails, with the apt output above it and a message that says
+      # no test ran.
       - name: Install Chromium
-        run: pnpm --filter e2e exec playwright install --with-deps chromium
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm --filter e2e exec playwright install --with-deps chromium; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              echo "::warning::the browser did not install (attempt ${attempt}/3) — retrying in $((attempt * 20))s"
+              sleep $((attempt * 20))
+            fi
+          done
+          echo "::error::the browser never installed, so no test ran. The output above says which half failed: the apt-get for Chromium's libraries, the browser download, or the workspace it was run in."
+          exit 1
 
       # Through the Makefile, exactly as a developer runs it, so CI and a
       # developer's machine cannot drift into running different commands. The
