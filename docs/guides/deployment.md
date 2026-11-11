@@ -141,8 +141,23 @@ browser JavaScript.
 
 ## A release
 
-    make deploy-images                    # on the build machine: build, then one tarball
+A push to `staging` or `main` runs `.github/workflows/release.yml`, which builds all three images
+and — where a registry is configured — publishes `scriptoria-backend` and `scriptoria-runner` tagged
+with the branch and the commit. The registry is a repository variable plus two secrets, not a
+constant (see the branch guide); unset, that job builds and publishes nothing. The **frontend is
+never published**: its terminal address is compiled in at build time, so it is built per
+environment, here:
+
+    # on the build machine: build, then one tarball — with *this environment's* terminal address,
+    # because the frontend bundle has it compiled in and no runtime setting can change it
+    make deploy-images TERMINAL_WS_URL=wss://<this environment's host>/terminal
     infra/deploy/scripts/load-images.sh scriptoria-images.tar    # on each host
+
+Passing `TERMINAL_WS_URL` is not optional in anything but the dev default: `make deploy-images`
+builds the frontend with `NEXT_PUBLIC_TERMINAL_WS_URL` as a **build argument**, and the Dockerfile
+compiles it into the bundle. Build without it and the tarball's frontend is an image whose terminal
+sockets go to `ws://localhost:3001` — which a browser on that host will fail to reach, and which no
+restart repairs, because the address is in the JavaScript.
 
 The tarball carries the three platform images and the three the data and directory instances run.
 Nothing is pulled on a provisioned host: NFR-01 puts these networks in a position where there is no

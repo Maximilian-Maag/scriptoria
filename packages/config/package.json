@@ -10,6 +10,7 @@
     "build": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
+    "check:env-example": "tsx src/checkEnvExample.ts",
     "test:watch": "vitest"
   },
   "dependencies": {
