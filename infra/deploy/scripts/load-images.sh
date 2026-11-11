@@ -8,8 +8,14 @@
 # `--pull=never` for the same reason, so a missing image fails immediately instead
 # of spending a timeout on a registry that is not reachable.
 #
-#   make deploy-images          # on the build machine: build, then save to a tarball
+#   make deploy-images TERMINAL_WS_URL=wss://<this environment's host>/terminal
+#                               # on the build machine: build, then save to a tarball
 #   ./load-images.sh scriptoria-images.tar
+#
+# That build argument is not optional. The frontend compiles the terminal's WebSocket
+# address into its bundle (ADR-007), so a tarball built without it ships a frontend whose
+# terminal sockets go to `ws://localhost:3001` — and no restart, env file or unit
+# override on the host can repair it, because the address is in the JavaScript.
 #
 # Loading is additive: it replaces an image of the same tag and leaves the ones it
 # does not mention. Rolling back is loading the previous tarball.
