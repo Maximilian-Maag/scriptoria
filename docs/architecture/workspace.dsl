@@ -48,6 +48,7 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
                 svc_catalog = component "Script Catalog Service" "Caches the parsed script headers (ADR-004)."
                 svc_runs = component "Run Orchestrator" "The run state machine. The only component that may dispatch one — and it admits at most one run per script VM at a time (ADR-013)."
                 svc_results = component "Result Service" "Lists, streams and ZIPs a run's output files (FA-09.5)."
+                svc_retention = component "Transcript Retention" "Prunes a run's transcript bytes once they are older than the retention window — when a window is configured at all: TRANSCRIPT_RETENTION_DAYS=0 keeps every transcript. The run record, its events, its result records and the audit trail never expire either way (ADR-014)." "Sweep on a timer, drains its own backlog"
                 svc_schedules = component "Schedule Service" "Reads and writes the crontab; computes the next run (ADR-005)."
                 svc_audit = component "Audit Service" "Records who did what, where, when and with what outcome."
 
@@ -155,6 +156,8 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
         svc_results -> run_collector "Lists and streams the output directory" "queue"
         svc_results -> svc_audit "Records every download" "internal"
         svc_results -> lib_repo "Result records" "internal"
+        svc_retention -> lib_repo "Prunes a batch of transcripts, and is told how many it pruned" "internal"
+        svc_retention -> logs "Emits what it pruned and what it could not" "Syslog"
         svc_schedules -> run_cron "Reads and writes the crontab" "queue"
         svc_schedules -> lib_repo "Job metadata and last successful run" "internal"
         svc_audit -> lib_repo "Writes the audit trail" "internal"
@@ -458,10 +461,10 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
         }
 
         component backend "Component_Backend_Data" {
-            include svc_areas svc_authz svc_catalog svc_runs svc_results svc_schedules svc_audit api_audit api_health
+            include svc_areas svc_authz svc_catalog svc_runs svc_results svc_schedules svc_retention svc_audit api_audit api_health
             include frontend lib_repo lib_session database broker logs monitoring
             autoLayout lr 400 300
-            description "Everything that outlives a request. Only the repository layer speaks SQL, every service records through the audit service, and an audit write can never fail the operation it records."
+            description "Everything that outlives a request — and the one thing that deliberately does not, where a retention window is set: a run's transcript bytes expire on a timer (ADR-014, and a window of 0 keeps them) while the run record, its events, its result records and the audit trail never do. Only the repository layer speaks SQL, every service records through the audit service, and an audit write can never fail the operation it records."
         }
 
         component runner "Component_Runner" {
