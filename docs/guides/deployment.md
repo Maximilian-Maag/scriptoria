@@ -139,6 +139,24 @@ WebSocket straight to the control plane, and publishes the control plane's healt
 published: the browser's REST surface is the frontend, which is what keeps session material out of
 browser JavaScript.
 
+That configuration is exercised as well as parsed: this file run in an `nginx` container on the host
+network, in front of a running control plane and frontend, answers
+
+    http://localhost/            -> 301 to https
+    https://localhost/           -> 200, text/html                    (the frontend)
+    https://localhost/healthz    -> 200, {"status":"ok", …}           (the control plane)
+    /terminal, WebSocket upgrade -> 401 from the control plane        (the upgrade reached it)
+    any other path               -> the frontend, never the control plane
+
+`nginx -t` proves the file parses; those five lines are what prove the routing.
+
+**A WebSocket test has to say `--http1.1`.** The same port serves HTTP/2 and HTTP/1.1, and a browser
+opens a WebSocket over HTTP/1.1 — but `curl` negotiates h2 by default, and nginx does not translate
+an h2 request into an HTTP/1.1 upgrade. `curl -k https://host/terminal` with upgrade headers
+therefore answers **404**, which reads exactly like "the proxy does not route the terminal", while
+`curl -k --http1.1 …` answers 401 from the control plane. One flag, and the difference between a
+correct configuration and an afternoon.
+
 ## A release
 
 A push to `staging` or `main` runs `.github/workflows/release.yml`, which builds all three images
