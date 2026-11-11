@@ -364,7 +364,7 @@ registry.registerPath({
   tags: ["Runs"],
   summary: "The terminal scrollback of a finished run",
   description:
-    "The durable copy of the PTY bytes, base64 because they are bytes and not text (ADR-006). The live stream is capped and expires; this does not, so a run opened a month later shows what it showed while it ran (FA-07.2). A run that printed nothing answers with an empty transcript rather than a 404 — many scripts deliberately print nothing (FA-07.5).",
+    "The durable copy of the PTY bytes, base64 because they are bytes and not text (ADR-006). The live stream is capped and expires; the transcript outlives it, so a run opened a month later shows what it showed while it ran (FA-07.2). It is kept for TRANSCRIPT_RETENTION_DAYS (90 by default) and then its bytes are dropped while the record stays — `expired: true` says that happened, and `sizeBytes` still says how much output there was (O-5, ADR-014). A run that printed nothing, or one still running, answers with an empty transcript and `expired: false` rather than a 404 — many scripts deliberately print nothing (FA-07.5).",
   security: secured,
   responses: {
     200: json("The scrollback, `truncated` when the run outran the stream cap", RunTranscript),

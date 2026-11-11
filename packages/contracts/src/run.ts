@@ -190,5 +190,16 @@ export const runTranscriptSchema = z.object({
   sizeBytes: z.number().int().min(0),
   /** True when the run outran STREAM_MAXLEN and the head was trimmed. */
   truncated: z.boolean(),
+  /**
+   * O-5 / ADR-014 — the bytes are gone, and the run is old enough that this is
+   * the explanation rather than a script that printed nothing.
+   *
+   * A boolean rather than a fifth status: the console shows the same empty
+   * terminal either way, and what differs is the one line it says above it. It is
+   * also the difference between "this script printed nothing" (FA-07.5, an
+   * ordinary outcome) and "the platform deleted this" — the second one must not be
+   * presented as the first.
+   */
+  expired: z.boolean(),
 });
 export type RunTranscript = z.infer<typeof runTranscriptSchema>;
