@@ -1,0 +1,96 @@
+name: Release
+
+# What a release publishes, and the one decision it leaves to the repository.
+#
+# NFR-01 puts every provisioned environment in a network with no route out, so the thing that
+# actually ships is the tarball `make deploy-images` writes — carried in and loaded with
+# `deploy/scripts/load-images.sh`. A registry is for the places that *do* have a route: a
+# staging box, a colleague's machine, a CI image cache. Which registry that is, and what
+# credential pushes to it, is a decision nobody has taken, so it is **one repository variable
+# and two secrets** rather than a constant in this file. Set them and this publishes; leave
+# them unset and it says so and still builds, which is the honest state of a release pipeline
+# whose destination is undecided.
+#
+# The frontend is deliberately **not** published. Its terminal WebSocket address is compiled
+# into the bundle at build time (`apps/frontend/Dockerfile`, ADR-007), so it differs per
+# environment and is built at deploy time from that environment's own address. A per-branch
+# frontend image would be an image whose WebSocket points somewhere wrong. It is still built
+# here, as a smoke test of its Dockerfile — nothing else in CI builds it.
+
+on:
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+
+# A release is not cancelled by the next push. An image that half-pushed is worse than one a
+# few minutes stale, and what an environment deploys is whatever the last complete run wrote.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    name: Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      # Says which of the two shapes this run is, before it does anything: an operator reading
+      # the log of a release that published nothing should not have to infer why.
+      - name: Where this release goes
+        env:
+          REGISTRY: ${{ vars.REGISTRY }}
+        run: |
+          if [ -z "${REGISTRY}" ]; then
+            echo "::notice::No registry is configured, so the images are built and not published. Set the repository variable REGISTRY and the secrets REGISTRY_USERNAME and REGISTRY_PASSWORD to publish."
+          else
+            echo "publishing to ${REGISTRY} as ${GITHUB_REF_NAME} and ${GITHUB_SHA:0:12}"
+          fi
+
+      # All three Dockerfiles, because this is the only job that builds them: the frontend too,
+      # even though it is not published — the point here is that it builds from this commit.
+      - name: Build the images
+        run: make docker-build
+
+      - name: Log in
+        if: vars.REGISTRY != ''
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ vars.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # Two tags per image: the branch, which is what a staging box follows, and the commit,
+      # which is the only tag that can be pointed at a week later with any confidence.
+      - name: Push
+        if: vars.REGISTRY != ''
+        env:
+          REGISTRY: ${{ vars.REGISTRY }}
+        run: |
+          set -eu
+          for image in backend runner; do
+            for tag in "${GITHUB_REF_NAME}" "${GITHUB_SHA:0:12}"; do
+              docker tag "scriptoria-${image}:latest" "${REGISTRY}/scriptoria-${image}:${tag}"
+              docker push "${REGISTRY}/scriptoria-${image}:${tag}"
+            done
+          done
+          # `docker push` exits 0 when the registry accepted the layers. Ask the registry
+          # for the manifest, so "published" is read back rather than claimed — the tag is
+          # what an environment will pull, and a typo in it fails here rather than at 3am.
+          for image in backend runner; do
+            docker manifest inspect "${REGISTRY}/scriptoria-${image}:${GITHUB_REF_NAME}" > /dev/null
+          done
+          {
+            echo "### Published"
+            for image in backend runner; do
+              echo "- \`${REGISTRY}/scriptoria-${image}:${GITHUB_REF_NAME}\` and \`:${GITHUB_SHA:0:12}\`"
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
