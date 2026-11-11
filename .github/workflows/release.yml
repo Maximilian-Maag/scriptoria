@@ -95,8 +95,21 @@ jobs:
           # `docker push` exits 0 when the registry accepted the layers. Ask the registry
           # for the manifest, so "published" is read back rather than claimed — the tag is
           # what an environment will pull, and a typo in it fails here rather than at 3am.
+          #
+          # Two attempts, because `docker manifest inspect` does not read the daemon's
+          # `insecure-registries`: a registry served over plain HTTP — which is the likely
+          # shape for a private network with no route out — answers "no such manifest" for a
+          # tag that was pushed a second earlier. Proved by running this job against a local
+          # `registry:2` on :5000: the pushes succeed, the first inspect fails, `--insecure`
+          # reads the same digest. A registry with TLS passes the first attempt.
           for image in backend runner; do
-            docker manifest inspect "${REGISTRY}/scriptoria-${image}:${TAG}" > /dev/null
+            ref="${REGISTRY}/scriptoria-${image}:${TAG}"
+            if ! docker manifest inspect "${ref}" > /dev/null 2>&1; then
+              docker manifest inspect --insecure "${ref}" > /dev/null || {
+                echo "::error::${ref} was pushed but cannot be read back from the registry"
+                exit 1
+              }
+            fi
           done
           {
             echo "### Published"
