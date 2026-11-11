@@ -306,6 +306,16 @@ export const runTranscripts = pgTable("run_transcripts", {
   /** True when the run outran STREAM_MAXLEN and the head was trimmed. */
   truncated: boolean("truncated").notNull().default(false),
   persistedAt: timestamp("persisted_at", { withTimezone: true }).notNull().defaultNow(),
+
+  /**
+   * O-5 / ADR-014 — when the bytes were dropped by retention.
+   *
+   * The row stays and the content goes empty, rather than the row being deleted:
+   * a run that printed nothing and a run whose output was pruned look identical in
+   * the terminal, and only one of them deserves to. Keeping the record is what
+   * lets the console say which it is, and it costs 40 bytes for a 2 MB saving.
+   */
+  prunedAt: timestamp("pruned_at", { withTimezone: true }),
 });
 
 /**
