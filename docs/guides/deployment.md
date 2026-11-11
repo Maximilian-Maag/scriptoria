@@ -210,6 +210,23 @@ with the tools they already have. It is the only part of this that cannot be aut
       'pg_restore --clean --if-exists --no-owner --dbname="$DATABASE_URL" /backups/<file>.dump'
     sudo systemctl start 'scriptoria-backend@1' scriptoria-frontend
 
+Run against a database the end-to-end suite had filled rather than a freshly migrated one — 117
+runs, 907 events, 116 transcripts, 249 result files, 875 audit entries — the command above gave
+`pg_restore` **exit 0, no errors, no warnings**, and every table's contents were identical by md5.
+A restore that works is silent; the seconds between stopping the control plane and starting it
+again are the only thing to watch.
+
+**Keep the client's major version equal to the server's.** The restore image and the one
+`scriptoria-backup.service` dumps with are both `postgres:16-alpine`, and that is a requirement
+rather than a habit: `pg_dump` from a *newer* client writes `SET transaction_timeout = 0;`, which is
+a PostgreSQL 17 setting, and a 16 server rejects it. `pg_restore` then answers
+
+    pg_restore: error: could not execute query: ERROR:  unrecognized configuration parameter "transaction_timeout"
+    pg_restore: warning: errors ignored on restore: 1
+
+and exits **1** — on a restore that otherwise completed. Upgrade the image, the dump and the restore
+together, or not at all.
+
 ## What is checked, and where
 
 `make deploy-check` runs five things, and CI runs them on every pull request in the "Deployment
