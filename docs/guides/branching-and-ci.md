@@ -70,6 +70,33 @@ on `staging` blocks the next promotion for exactly this reason.
 The alignment commit is therefore not a workaround for a missing setting. It is what makes
 `strict` satisfiable at all.
 
+### When a promotion is due
+
+The invariant is not "`staging` and `main` always equal `dev`". It is "they equal `dev` *after every
+promotion*", and between promotions they legitimately differ. What makes a promotion due is whether
+`dev` carries something a **deployment runs**: code, a schema migration, configuration, a unit, an
+image. Docs and tests that change nothing at runtime are promoted because they are on the branch a
+release is cut from, not because they need a release of their own — they ride along with the next
+one.
+
+Both directions have a cost worth naming:
+
+- a release branch missing a migration that `dev` has is the failure to avoid: a deploy from it runs
+  new code against an old schema. That is not hypothetical — it is why `runs.dispatched_at` did not
+  wait for a release.
+- promoting a single docs commit costs two pull requests and two full CI runs to change nothing an
+  operator sees.
+
+`make ladder` prints what each branch points at and whether its content agrees, reading `origin`
+rather than a possibly stale local branch:
+
+    dev      9b60f0d  401758c8…
+    staging  1ac6666  8a190a2b…
+    staging differs from dev — a promotion is due if dev carries something a deployment runs
+
+Equal **tree** hashes are the whole test. A promotion rewrites commits, so commit hashes differ by
+design and content is the only thing that can be compared.
+
 ## Topic branches
 
 Named `<kind>/<slug>`, where the kind says what the change is:
