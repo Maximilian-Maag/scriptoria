@@ -250,7 +250,12 @@ async function drive(
     // did, and recording it as stopped would both lie about the script and take
     // the run out of FA-10.2's *last successful* on the strength of a late click
     // (ADR-003 keeps `aborted` for a run a human really stopped).
-    const stopped = abort.wasSignalled;
+    //
+    // `wasRequested`, not `wasSignalled`: the signal is a round trip over SSH, and a
+    // script that dies on the first SIGINT closes the channel before the round trip
+    // returns. Classifying on "a signal was delivered" therefore reads a stop the
+    // operator performed as a lost connection — see the getter's note.
+    const stopped = abort.wasRequested;
     const status = stopped ? "aborted" : exit.code === 0 ? "succeeded" : "failed";
     const failureReason: RunFailureReason | null = stopped
       ? "aborted_by_user"

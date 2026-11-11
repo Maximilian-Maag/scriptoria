@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-down dev-logs ports run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed docker-build docker-build-frontend docker-build-backend docker-build-runner deploy-images deploy-check deploy-check-shell deploy-check-env deploy-check-tests deploy-check-units deploy-check-nginx deploy-check-terraform diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
+.PHONY: help install dev dev-down dev-logs ports run run-frontend run-backend run-runner build lint type-check test test-e2e test-db test-db-prune db-check db-check-test db-generate db-migrate db-push db-studio db-seed ladder docker-build docker-build-frontend docker-build-backend docker-build-runner deploy-images deploy-check deploy-check-shell deploy-check-env deploy-check-tests deploy-check-units deploy-check-nginx deploy-check-terraform diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean fixtures-key clean
 
 # pnpm is installed via the standalone script — add its bin dir to PATH so make can find it
 PNPM_HOME ?= $(HOME)/.local/share/pnpm
@@ -63,6 +63,7 @@ help:
 	@echo "  db-push               push the schema straight to the database — see the note below"
 	@echo "  db-studio             open Drizzle Studio"
 	@echo "  db-seed               seed the initial root group mapping and the reference area"
+	@echo "  ladder                show what each release branch points at, and whether their content agrees"
 	@echo "  docker-build          build all three images"
 	@echo "  deploy-images         build the three images and pack them, with the stores, into one tarball"
 	@echo "  deploy-check          check the deployment layer: units, proxy, configuration"
@@ -214,6 +215,27 @@ db-studio:
 
 db-seed:
 	$(PNPM) --filter @scriptoria/db db:seed
+
+# ── The ladder ────────────────────────────────────────────────────────────────
+# dev → staging → main, promoted by an alignment commit, and the invariant is not
+# "always equal" — it is "equal after every promotion". Whether that holds is a fact
+# about tree hashes, and the tree hash is what this prints: two branches with the same
+# content have the same tree even though a promotion rewrites their commits.
+#
+# Against `origin`, not the local branches: a checkout whose `staging` was never
+# pulled says nothing about what a release would be cut from.
+ladder:
+	@for b in dev staging main; do \
+	  printf '  %-8s %s  %s\n' "$$b" "$$(git rev-parse --short origin/$$b)" "$$(git rev-parse origin/$$b^{tree})"; \
+	done; \
+	dev=$$(git rev-parse origin/dev^{tree}); \
+	for b in staging main; do \
+	  if [ "$$(git rev-parse origin/$$b^{tree})" = "$$dev" ]; then \
+	    echo "  $$b carries dev's content"; \
+	  else \
+	    echo "  $$b differs from dev — a promotion is due if dev carries something a deployment runs"; \
+	  fi; \
+	done
 
 # The terminal's WebSocket address is compiled into the frontend bundle rather
 # than read from the environment at runtime (see apps/frontend/Dockerfile), so

@@ -94,6 +94,32 @@ export const backendSchema = sharedSchema
      * immediately as well; the sweep exists for the runs that were waiting.
      */
     DISPATCH_SWEEP_MS: intFromEnv({ min: 250 }).default(5_000),
+
+    /**
+     * O-5 / ADR-014 — how many days a finished run's terminal transcript is kept.
+     *
+     * Ninety, which is what the requirement proposed: the transcript is the only
+     * thing in the database that grows without bound, and run and audit records are
+     * smaller. **Zero keeps everything**, which is the shape a
+     * deployment gets when nobody has decided — keeping data is the safe default,
+     * and a customer who needs ten years changes this line.
+     *
+     * Capped at a century: past that the cutoff leaves the range `Date` can
+     * represent, so every pass would log an error and prune nothing — a
+     * misconfiguration that validation should refuse at boot rather than hide.
+     */
+    TRANSCRIPT_RETENTION_DAYS: intFromEnv({ min: 0, max: 36_500 }).default(90),
+
+    /**
+     * How often the transcript sweep runs. Hours rather than seconds: the thing it
+     * deletes is already months old, so the interval only decides how long a
+     * pruned-and-unswept gap can be, and a query every few seconds would be noise.
+     *
+     * Capped at the largest delay `setInterval` accepts: Node clamps anything above
+     * 2 147 483 647 ms to **1 ms**, so a value meant as "very rarely" would fire the
+     * sweep continuously instead.
+     */
+    RETENTION_SWEEP_MS: intFromEnv({ min: 60_000, max: 2_147_483_647 }).default(6 * 60 * 60_000),
   });
 
 export const loadBackendConfig = defineConfig("backend", backendSchema);

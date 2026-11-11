@@ -243,6 +243,45 @@ export async function getTranscript(runId: string) {
   return row ?? null;
 }
 
+/**
+ * O-5 / ADR-014 — drop the bytes of transcripts past their retention window.
+ *
+ * The row stays, with `pruned_at` set and no content: the console has to be able to
+ * say "this was pruned" rather than showing an empty terminal that reads as a script
+ * that printed nothing (FA-07.5). So this is an UPDATE, never a DELETE, and it is
+ * idempotent — a second pass matches nothing because `pruned_at` is no longer null.
+ *
+ * Batched, because the alternative is one statement holding a lock over every old
+ * transcript in the table, and the sweep runs on a timer: `batch` rows per pass,
+ * oldest first, and the next pass continues.
+ */
+export async function pruneTranscriptsBefore(cutoff: Date, batch: number): Promise<number> {
+  if (batch < 1) return 0;
+
+  const rows = await db()
+    .update(schema.runTranscripts)
+    .set({ content: "", prunedAt: new Date() })
+    .where(
+      inArray(
+        schema.runTranscripts.runId,
+        db()
+          .select({ runId: schema.runTranscripts.runId })
+          .from(schema.runTranscripts)
+          .where(
+            and(
+              isNull(schema.runTranscripts.prunedAt),
+              lt(schema.runTranscripts.persistedAt, cutoff),
+            ),
+          )
+          .orderBy(asc(schema.runTranscripts.persistedAt))
+          .limit(batch),
+      ),
+    )
+    .returning({ runId: schema.runTranscripts.runId });
+
+  return rows.length;
+}
+
 // ── Dispatch (O-7, ADR-013) ──────────────────────────────────────────────────
 
 export interface AdmittedRun {

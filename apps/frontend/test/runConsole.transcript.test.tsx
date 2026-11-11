@@ -90,7 +90,11 @@ function json(body: unknown): Response {
 }
 
 /** The run the control plane answers with, and every path the page asked for. */
-function answering(answer: Run, transcript = "UmVhZGluZyBpbnRlcmZhY2Vz"): string[] {
+function answering(
+  answer: Run,
+  transcript = "UmVhZGluZyBpbnRlcmZhY2Vz",
+  extra: { expired?: boolean; sizeBytes?: number } = {},
+): string[] {
   const asked: string[] = [];
   vi.stubGlobal(
     "fetch",
@@ -99,7 +103,13 @@ function answering(answer: Run, transcript = "UmVhZGluZyBpbnRlcmZhY2Vz"): string
       asked.push(path);
       if (path === `/runs/${RUN_ID}`) return json(answer);
       if (path === `/runs/${RUN_ID}/transcript`)
-        return json({ contentBase64: transcript, truncated: false });
+        return json({
+          contentBase64: transcript,
+          truncated: false,
+          expired: false,
+          sizeBytes: 0,
+          ...extra,
+        });
       // The console also renders the result panel, which asks for the run's
       // files. Answered properly rather than left to 404: the panel reports a
       // failed read as a failure (#57), so a 404 here puts "Could not read the
@@ -197,5 +207,29 @@ describe("where the run console's terminal gets its content (FA-07.2)", () => {
     const shown = document.body.textContent ?? "";
     expect(shown).toContain("Finished");
     expect(shown).not.toMatch(/could not|not available|failed to|went wrong|error/i);
+  });
+
+  it("says a transcript was pruned rather than showing it as a run that printed nothing (O-5, ADR-014)", async () => {
+    // The row survived the retention sweep and its bytes did not. Without the
+    // notice, this page renders an empty terminal — the identical screen to a
+    // script that said nothing — and the operator has no way to tell that the
+    // platform, not the script, is why it is blank.
+    const asked = answering(run("succeeded"), "", { expired: true, sizeBytes: 2_048 });
+
+    await open();
+
+    await waitFor(() => expect(asked).toContain(`/runs/${RUN_ID}/transcript`));
+    // The notice is rendered from the transcript response, so wait for the render
+    // rather than for the request: asserting between the two is the flake shape.
+    await waitFor(() =>
+      expect(document.body.textContent ?? "").toMatch(
+        /terminal output was deleted after the retention period/,
+      ),
+    );
+    const shown = document.body.textContent ?? "";
+    expect(shown, "it still says how much output there was").toContain("2 KB");
+    // Pruning is bookkeeping, not a failure: the run finished, and the record says so.
+    expect(shown).toContain("Finished");
+    expect(shown).not.toMatch(/could not|not available|failed to|error/i);
   });
 });

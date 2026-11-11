@@ -63,6 +63,27 @@ export class StagedAbort {
     return this.reachedStage !== null;
   }
 
+  /**
+   * True once a stop was *accepted* — a request that arrived while the process was
+   * still there, which is the only kind that is acted on at all.
+   *
+   * This, and not `wasSignalled`, is what decides how a run is recorded. Sending a
+   * signal is a round trip over SSH, and a script that dies on the first SIGINT
+   * closes the channel before that round trip returns — so at the moment the exit is
+   * classified, `wasSignalled` can still be false while the run was, in every sense
+   * that matters, stopped by a human. Measured: stopping the fixture's rollout in the
+   * interface recorded `failed / connection_lost`, with its own `abort_signalled`
+   * event written one moment later. The interface then calls an intentional stop a
+   * failure (FA-08.3 says it is a decision) and the audit trail agrees with it.
+   *
+   * The late-click case that `wasSignalled` was protecting is not reopened by this:
+   * `request()` refuses a process that is already gone, so a stop that arrives after
+   * the script exited never sets this.
+   */
+  get wasRequested(): boolean {
+    return this.requested;
+  }
+
   /** How far the escalation actually had to go. Null when nothing was signalled. */
   get stage(): AbortStage | null {
     return this.reachedStage;

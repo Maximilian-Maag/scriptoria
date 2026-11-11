@@ -68,6 +68,7 @@ The architecture model: [`docs/architecture/workspace.dsl`](docs/architecture/wo
 The decisions behind it: [`docs/architecture/adr/`](docs/architecture/adr/).
 How the branches and CI work: [`docs/guides/branching-and-ci.md`](docs/guides/branching-and-ci.md).
 What a provisioned environment is made of: [`docs/guides/deployment.md`](docs/guides/deployment.md).
+What the script VM has to look like, from its owner's side: [`docs/guides/script-vm.md`](docs/guides/script-vm.md).
 
 ## Technology Stack
 
@@ -178,7 +179,11 @@ scriptoria/
 │   │   ├── adr/                # Architecture decision records
 │   │   └── diagrams/           # Generated, gitignored — `make diagrams`
 │   ├── guides/
-│   │   └── branching-and-ci.md # The three branches and what runs before a merge
+│   │   ├── branching-and-ci.md # The three branches and what runs before a merge
+│   │   ├── deployment.md       # Provisioning, first bring-up, releases, backup
+│   │   ├── script-vm.md        # What the platform expects of the machine the scripts live on
+│   │   └── examples/
+│   │       └── reference-script.sh  # Copy-me script: header block, results, trap, exit codes
 │   └── requirements/
 │       └── requirements.md     # FA-xx / NFR-xx, referenced from the model and the code
 ├── infra/
