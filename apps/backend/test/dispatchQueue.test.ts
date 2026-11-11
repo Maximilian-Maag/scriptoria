@@ -292,6 +292,24 @@ describe("dispatching a queued run to its script VM", () => {
     expect(await isDispatched(live)).toBe(true);
   });
 
+  it("hands the runs back oldest first, because that is the order they start in", async () => {
+    // The caller pushes jobs in the order it is given and the runner's queue is FIFO, so
+    // the order of this list is the order the scripts start in. RETURNING does not
+    // preserve it on its own — it hands back rows in storage order — which showed up as
+    // two ids swapped in about one run out of ten.
+    const area = await seedArea("Network");
+    const oldestFirst = [
+      await queuedRun(area, "vm-a.test", 4),
+      await queuedRun(area, "vm-a.test", 3),
+      await queuedRun(area, "vm-a.test", 2),
+      await queuedRun(area, "vm-a.test", 1),
+    ];
+
+    const admitted = await runRepository.admitForDispatch(4, 10);
+
+    expect(admitted.map((run) => run.id)).toEqual(oldestFirst);
+  });
+
   it("waits for the dispatch lock instead of deciding alongside another dispatcher", async () => {
     // The property the single lock exists for, and the only way to assert it from one
     // process: hold the lock from another connection and prove admission blocks on

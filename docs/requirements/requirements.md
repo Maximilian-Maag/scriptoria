@@ -258,16 +258,22 @@ terminal output down to critical messages.
 These block nothing in the walking skeleton but must be closed before the corresponding
 feature is built. Each one has a proposed answer.
 
-| ID | Question | Proposal | Blocks |
-|---|---|---|---|
-| O-1 | Scope of the recurring-job metadata (FA-10.2) | Reduce to *last successful*; no failure alerting — the monitoring system owns that | FA-10 |
-| O-2 | Abort semantics. What happens to a half-finished **modifying** script partway through hundreds of sites? | ADR-003: staged SIGINT → SIGTERM → SIGKILL, immediate for read-only scripts, confirmation plus audit entry for modifying ones | FA-08 |
-| O-3 | No visual guideline document exists yet | Build against design tokens so a later guideline is a token swap, not a rewrite | FA-03 UI |
-| O-4 | Which crontab, under which account, and does it stay authoritative? | The crontab on the script VM **stays authoritative**; the platform reads and writes it and never runs a second scheduler | FA-10 |
-| O-5 | Retention of terminal logs and run history | Proposal: terminal log 90 days, run and audit records indefinite — they are small | FA-07, FA-12 |
-| O-6 | A reference script and its setup documentation for the target environment | Precondition for pointing the walking skeleton at a real script VM. Until then it runs against the sshd fixture. | Walking skeleton |
-| O-7 | How many concurrent runs per script VM are permitted? | Proposal: configurable per area, default 1, since the scripts were written for sequential manual use | FA-05 |
-| O-8 | How is a script's read-only/modifying nature declared (FA-03.5)? | ADR-004: a structured header block in the script, with a stored override as fallback | FA-03 |
+The **status** column is kept current against the code rather than against the discussion: a
+decision whose feature has been built and whose number now lives in the deployment's
+configuration is *implemented*, and saying otherwise here sends the next reader to re-decide
+something the platform already does. Where a proposal was implemented and something is still
+owed by a person, the cell says which. Each row's issue carries the file pointers.
+
+| ID | Question | Proposal | Blocks | Status |
+|---|---|---|---|---|
+| O-1 | Scope of the recurring-job metadata (FA-10.2) | Reduce to *last successful*; no failure alerting — the monitoring system owns that | FA-10 | **Implemented** — `lastSuccessfulAt` plus `nextRunAt` derived at read time; no alerting |
+| O-2 | Abort semantics. What happens to a half-finished **modifying** script partway through hundreds of sites? | ADR-003: staged SIGINT → SIGTERM → SIGKILL, immediate for read-only scripts, confirmation plus audit entry for modifying ones | FA-08 | **Implemented** (ADR-003); grace periods are `ABORT_*_GRACE_MS` in the deployment's configuration. **Owed:** agreement on 5 s / 10 s, and that the platform does not roll back (NFR-06) |
+| O-3 | No visual guideline document exists yet | Build against design tokens so a later guideline is a token swap, not a rewrite | FA-03 UI | **Implemented** — the tokens are CSS custom properties in `globals.css`; a guideline is still an input nobody can produce |
+| O-4 | Which crontab, under which account, and does it stay authoritative? | The crontab on the script VM **stays authoritative**; the platform reads and writes it and never runs a second scheduler | FA-10 | **Implemented** (ADR-005) — `crontab -l` / `crontab -`, managed delimiters only. **Owed:** confirmation of the account, and permission to write that crontab |
+| O-5 | Retention of terminal logs and run history | Proposal: terminal log 90 days, run and audit records indefinite — they are small | FA-07, FA-12 | **Implemented** (ADR-014) — transcripts pruned at `TRANSCRIPT_RETENTION_DAYS` (90, 0 = keep everything); run and audit records never pruned. **Owed:** the number |
+| O-6 | A reference script and its setup documentation for the target environment | Precondition for pointing the walking skeleton at a real script VM. Until then it runs against the sshd fixture. | Walking skeleton | **Outstanding** — the platform's half is written (`docs/guides/script-vm.md`, `examples/reference-script.sh`); **owed:** the machine, its account, and one annotated script |
+| O-7 | How many concurrent runs per script VM are permitted? | Proposal: configurable per area, default 1, since the scripts were written for sequential manual use | FA-05 | **Implemented** (ADR-013) — one run per script VM by default, `MAX_CONCURRENT_RUNS_PER_HOST`. **Owed:** the number, per VM rather than per area |
+| O-8 | How is a script's read-only/modifying nature declared (FA-03.5)? | ADR-004: a structured header block in the script, with a stored override as fallback | FA-03 | **Implemented** (ADR-004) — the header parser, the override and the `modifying` default. **Owed:** the script owner annotating the existing scripts |
 
 > O-8 is a gap in the requirements rather than a carried-over question. It is tempting to
 > assume criticality is knowable; nothing in a script file states it, and it cannot be
