@@ -236,6 +236,7 @@ The destination is a decision rather than a constant: one repository **variable*
 **secrets**, so nothing in the repository has to change when it is taken.
 
     settings → variables:  REGISTRY              e.g. ghcr.io/<owner>, registry.example.internal:5000
+                           REGISTRY_INSECURE     only for a registry served over plain HTTP (see below)
     settings → secrets:    REGISTRY_USERNAME
                            REGISTRY_PASSWORD
 
@@ -261,18 +262,37 @@ afterwards held exactly those two repositories, which is the frontend's absence 
 than a promise.
 
 That run also found a real defect, which is why it was worth doing: `docker manifest inspect` does
-not read the daemon's `insecure-registries`, so against a registry served over plain HTTP — the
-likely shape inside a network with no route out — it answers `no such manifest` for a tag that was
-pushed a second earlier. The read-back now retries with `--insecure` and fails the job with a named
-error if both attempts fail.
+not read the daemon's `insecure-registries`, so against a registry served over plain HTTP it answers
+`no such manifest` for a tag that was pushed a second earlier.
+
+Reading it back without TLS is an **explicit opt-in**, not a fallback: `--insecure` also skips
+certificate *verification*, so a registry answering with a bad certificate would be read back
+anyway, and a silently-impersonated registry is worse than a missing confirmation. Set the
+repository variable `REGISTRY_INSECURE=true` when the registry really is plain HTTP — a private
+network with no route out is the case that will want it — and the read-back uses `--insecure`; left
+unset, verification stays mandatory and a handshake failure fails the job with a named error.
 
 What is left unverified is therefore narrow: the credentialed login to an external registry and its
 TLS path. `gh workflow run release.yml` with the three values set closes it; until then the honest
 claim is "the build is exercised and the publish path is proven against a local registry", not "the
 release is automated against ours".
 
-To repeat the check:
+To repeat the check — the registry on loopback only, and the environment the runner would give the
+steps, including the two files the step writes to:
 
-    docker run -d --rm -p 5000:5000 --name registry-test registry:2
-    REGISTRY=localhost:5000 GITHUB_REF_NAME=main GITHUB_SHA=$(git rev-parse HEAD) make docker-build
-    # then run the job's "Where this release goes" and "Push" steps with that environment
+```sh
+docker run -d --rm -p 127.0.0.1:5000:5000 --name registry-test registry:2
+
+export REGISTRY=127.0.0.1:5000 REGISTRY_INSECURE=true
+export GITHUB_REF_NAME=main GITHUB_SHA=$(git rev-parse HEAD)
+export GITHUB_ENV=$(mktemp) GITHUB_STEP_SUMMARY=$(mktemp)
+make docker-build
+
+# run the job's "Where this release goes" step, then import what GitHub would import:
+set -a; . "$GITHUB_ENV"; set +a          # TAG and SHORT_SHA, written by that step
+# run the job's "Push" step, then read the summary it wrote:
+cat "$GITHUB_STEP_SUMMARY"
+curl -s "http://127.0.0.1:5000/v2/_catalog"     # exactly the two published repositories
+
+docker rm -f registry-test
+```
