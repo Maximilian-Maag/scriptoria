@@ -23,16 +23,18 @@ deploy=$(dirname "$here")
 runtime=${RUNTIME:-docker}
 image=${NGINX_IMAGE:-nginx:1.27-alpine}
 
-if ! command -v "$runtime" > /dev/null 2>&1; then
-    echo "nginx.test: $runtime is not installed here — skipping the proxy's routing" >&2
+# A skip is reported as a skip, in the same shape as a pass: a check that silently passes when it
+# did nothing is worse than no check, and this one cannot assert anything without the ports the
+# configuration listens on.
+skip() {
+    echo "  the proxy's routing was skipped: $1"
     exit 0
-fi
+}
 
+command -v "$runtime" > /dev/null 2>&1 || skip "$runtime is not installed here"
 busy=$(ss -ltn 2>/dev/null | awk '$4 ~ /:80$/ || $4 ~ /:443$/' | wc -l)
-if [ "$busy" -ne 0 ]; then
-    echo "nginx.test: 80 or 443 is in use on this machine — skipping the proxy's routing" >&2
-    exit 0
-fi
+[ "$busy" -eq 0 ] || skip "80 or 443 is already in use on this machine"
+command -v python3 > /dev/null 2>&1 || skip "python3 is not installed here"
 
 work=$(mktemp -d)
 stub_pids=""
@@ -147,5 +149,8 @@ expect "the terminal upgrade reaches the control plane" "port=3001 path=/termina
 expect "the control plane's /api is not published" "port=3000" \
     "$(curl -sk --max-time 5 https://127.0.0.1/api/runs 2>&1 || true)"
 
-printf 'nginx.test: %d case(s) held, %d failed\n' "$passed" "$failed"
-[ "$failed" -eq 0 ]
+if [ "$failed" -ne 0 ]; then
+    echo "nginx.test: $passed case(s) held, $failed failed" >&2
+    exit 1
+fi
+echo "  the proxy's routing reaches the control plane, and nothing else does"
