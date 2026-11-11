@@ -9,9 +9,11 @@ import { describeError, log } from "../log";
  *
  * `RUNNER_CONCURRENCY` of these run side by side in one process. The knob is
  * PTYs per process rather than processes, because the SSH connections are the
- * expensive part — and because O-7 still has the concurrency question open at
- * the *script VM's* end, where the scripts were written for sequential manual
- * use.
+ * expensive part. As of ADR-013 it is a *ceiling* rather than the thing that
+ * binds: how many runs one script VM is given at once is decided before anything
+ * reaches this queue — by the control plane, per VM, one by default — because the
+ * scripts were written for sequential manual use and a second run on the same
+ * machine is what that limit exists to prevent.
  */
 
 /** How long a claim survives without renewal. Longer than a renewal interval. */

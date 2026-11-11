@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import next from "next";
 import { loadBackendConfig, loadEnvFile } from "@scriptoria/config";
 import { handleUpgrade } from "./src/lib/stream/gateway";
+import { startDispatchSweep } from "./src/lib/services/runDispatch";
 import { closeDb } from "@scriptoria/db";
 import { closeRedis } from "./src/lib/redis";
 
@@ -50,6 +51,16 @@ server.listen(config.BACKEND_PORT, () => {
 });
 
 /**
+ * O-7 / ADR-013 — the dispatch sweep.
+ *
+ * Started after the listener so a slow first sweep cannot delay the health check,
+ * and it is the only thing that starts a queued run whose script VM was busy when
+ * somebody asked for it. Runs queued while this process was down are dispatched
+ * by its first pass.
+ */
+const stopDispatchSweep = startDispatchSweep();
+
+/**
  * A shutdown closes the HTTP listener and the pools, and nothing else. It does
  * NOT try to stop running scripts: the PTYs belong to the runner, and a control
  * plane restart that killed them would be the exact failure the runner was
@@ -61,6 +72,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`${signal} — shutting down`);
+
+    // Only the sweep stops. A queued run is dispatched when a script VM frees up,
+    // and a control plane that is going away is not going to be the one to do it —
+    // the next process dispatches it on boot.
+    stopDispatchSweep();
 
     server.close(() => {
       void Promise.allSettled([closeDb(), closeRedis(), app.close()]).then(() => process.exit(0));

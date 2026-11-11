@@ -73,6 +73,27 @@ export const backendSchema = sharedSchema
      * directory over an already-open SSH connection is cheap.
      */
     CATALOG_CACHE_TTL_SECONDS: intFromEnv({ min: 0 }).default(60),
+
+    /**
+     * O-7 / ADR-013 — how many runs one script VM carries at once.
+     *
+     * One, because the scripts were written for sequential manual use and none
+     * of them promises that two copies can share an output directory, a lock or
+     * a site list. The number is configuration rather than a constant because it
+     * is the script owner's to answer, per VM, and because the fixture used in
+     * the tests is not the production one: a deployment whose VM is known to
+     * tolerate more raises this and nothing else changes.
+     */
+    MAX_CONCURRENT_RUNS_PER_HOST: intFromEnv({ min: 1, max: 64 }).default(1),
+
+    /**
+     * How often the control plane looks for work a busy script VM held back.
+     *
+     * This is also the delay an operator sees between a running script ending
+     * and the next queued one starting, so it is short. A start attempt dispatches
+     * immediately as well; the sweep exists for the runs that were waiting.
+     */
+    DISPATCH_SWEEP_MS: intFromEnv({ min: 250 }).default(5_000),
   });
 
 export const loadBackendConfig = defineConfig("backend", backendSchema);
