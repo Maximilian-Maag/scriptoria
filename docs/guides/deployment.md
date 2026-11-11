@@ -207,6 +207,12 @@ before a schema change is for.
 instance, verifies the archive lists, and keeps a fortnight. The unit fails if the dump cannot be
 read back, because a dump nobody has looked at is a file rather than a backup.
 
+Run for real — the script inside the `postgres:16-alpine` image the unit uses, against the dev
+database, with `BACKUP_KEEP=2` and three dumps taken: each run left only its final `.dump` (no
+`.partial` behind it), the directory ended with exactly the two newest, and the survivor lists 11
+table-data entries. The stub-based test covers the failures; this is the happy path with the real
+binaries.
+
 `install.sh` enables the timer on every host, because a backup that depends on somebody remembering
 to switch it on is a backup that does not exist. The unit then skips itself where there is no store
 container, so an app or runner instance runs no backup and reports no failure — and the timer being
