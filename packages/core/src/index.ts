@@ -32,6 +32,7 @@ export {
   type CronValidation,
 } from "./cron";
 export { commandRunsScript } from "./scriptReference";
+export { chooseAdmissions, type QueuedCandidate } from "./dispatch";
 export {
   encodeTerminalFrame,
   decodeTerminalFrame,

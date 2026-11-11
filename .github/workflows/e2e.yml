@@ -78,6 +78,9 @@ jobs:
           - requirement: NFR-18 isolation between areas
             slug: nfr-18
             spec: tests/10-isolation.spec.ts
+          - requirement: O-7 one run at a time per script VM
+            slug: o-7
+            spec: tests/11-concurrency.spec.ts
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
