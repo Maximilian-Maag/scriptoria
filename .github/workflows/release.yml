@@ -84,6 +84,7 @@ jobs:
         if: vars.REGISTRY != ''
         env:
           REGISTRY: ${{ vars.REGISTRY }}
+          REGISTRY_INSECURE: ${{ vars.REGISTRY_INSECURE }}
         run: |
           set -eu
           for image in backend runner; do
@@ -95,8 +96,29 @@ jobs:
           # `docker push` exits 0 when the registry accepted the layers. Ask the registry
           # for the manifest, so "published" is read back rather than claimed — the tag is
           # what an environment will pull, and a typo in it fails here rather than at 3am.
+          #
+          # `docker manifest inspect` does not read the daemon's `insecure-registries`, so
+          # against a registry served over plain HTTP it answers "no such manifest" for a tag
+          # that was pushed a second earlier — proved by running this job against a local
+          # `registry:2` on :5000, where the pushes succeeded and the inspect did not.
+          #
+          # --insecure is NOT a fallback: it also skips certificate *verification*, so a
+          # registry that answers with a bad certificate would be read back anyway, which is
+          # the one case where reading it back matters less than not trusting it. It is an
+          # explicit opt-in for a registry an owner has declared plain-HTTP — set the
+          # repository variable REGISTRY_INSECURE=true and nothing else changes.
+          fail_readback() {
+            echo "::error::$1 was pushed but cannot be read back from the registry"
+            echo "::error::If this registry is served over plain HTTP, set the repository variable REGISTRY_INSECURE=true; if it has a certificate, the failure is real and the publish is unconfirmed."
+            exit 1
+          }
           for image in backend runner; do
-            docker manifest inspect "${REGISTRY}/scriptoria-${image}:${TAG}" > /dev/null
+            ref="${REGISTRY}/scriptoria-${image}:${TAG}"
+            if [ "${REGISTRY_INSECURE}" = "true" ]; then
+              docker manifest inspect --insecure "${ref}" > /dev/null || fail_readback "${ref}"
+            else
+              docker manifest inspect "${ref}" > /dev/null || fail_readback "${ref}"
+            fi
           done
           {
             echo "### Published"
