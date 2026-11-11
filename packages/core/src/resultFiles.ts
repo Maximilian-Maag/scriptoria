@@ -48,10 +48,18 @@ export function contentTypeFor(fileName: string): string {
  */
 export const MAX_PREVIEW_BYTES = 262_144;
 
+/**
+ * Types that carry text but are not named `text/*`. YAML is `application/yaml`
+ * (RFC 9512) and a results file full of it is exactly what a preview is for, so
+ * the prefix alone would hide the one format the scripts write for machines and
+ * people both.
+ */
+const TEXT_BUT_NOT_TEXT_PREFIXED: readonly string[] = ["application/json", "application/xml", "application/yaml"];
+
 export function isPreviewable(fileName: string, sizeBytes: number): boolean {
   if (sizeBytes > MAX_PREVIEW_BYTES) return false;
   const type = contentTypeFor(fileName);
-  return type.startsWith("text/") || type === "application/json" || type === "application/xml";
+  return type.startsWith("text/") || TEXT_BUT_NOT_TEXT_PREFIXED.includes(type);
 }
 
 /**

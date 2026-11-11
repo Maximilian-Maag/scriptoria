@@ -43,6 +43,10 @@ describe("authoriseAbort", () => {
     });
   });
 
+  it("accepts the confirmation when the only difference is surrounding space", () => {
+    expect(authoriseAbort("modifying", "site-rollout.sh", "  site-rollout.sh ")).toEqual({ ok: true });
+  });
+
   it("refuses when the confirmation names a different script", () => {
     // The failure this prevents is stopping the wrong run out of a list, which
     // a yes/no dialogue does not prevent.

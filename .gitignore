@@ -28,6 +28,8 @@ next-env.d.ts
 
 # testing
 coverage/
+# Stryker's sandbox — a copy of the package it mutates, rewritten for every mutant
+.stryker-tmp/
 playwright-report/
 test-results/
 # Where the e2e global setup records the runner it started, for the teardown.

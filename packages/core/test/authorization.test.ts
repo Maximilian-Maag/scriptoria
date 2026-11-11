@@ -24,6 +24,11 @@ describe("groupNameFromDn", () => {
     expect(groupNameFromDn("scriptoria-firewall")).toBe("scriptoria-firewall");
   });
 
+  it("recognises the CN prefix in either case, because a directory is not tidy", () => {
+    expect(groupNameFromDn("CN=Netops,OU=Groups,DC=example")).toBe("Netops");
+    expect(groupNameFromDn("  cn=Netops,OU=Groups  ")).toBe("Netops");
+  });
+
   it("keeps an escaped comma that is part of the name", () => {
     expect(groupNameFromDn("cn=Network\\, West,ou=groups,dc=scriptoria,dc=test")).toBe(
       "Network, West",
@@ -92,6 +97,14 @@ describe("isRoot", () => {
       isRoot(["cn=scriptoria-root,ou=groups,dc=scriptoria,dc=test"], ["scriptoria-root"]),
     ).toBe(true);
     expect(isRoot(["scriptoria-firewall"], ["scriptoria-root"])).toBe(false);
+  });
+
+  it("is true when ANY configured root group is held, not all of them", () => {
+    // Two root groups configured is the normal case (an operations group and a
+    // break-glass one); holding one of them is root.
+    expect(isRoot(["CN=netops-admins,OU=Groups"], ["netops-admins", "break-glass"])).toBe(true);
+    expect(isRoot(["CN=break-glass,OU=Groups"], ["netops-admins", "break-glass"])).toBe(true);
+    expect(isRoot(["CN=netops,OU=Groups"], ["netops-admins", "break-glass"])).toBe(false);
   });
 
   it("does not make an administrator root by having many areas", () => {
