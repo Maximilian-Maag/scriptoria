@@ -48,6 +48,32 @@ describe("parseScriptHeader", () => {
     expect(header?.criticality).toBeUndefined();
   });
 
+  it("keeps the FIRST declaration of a key, so a duplicated key is a consistent mistake", () => {
+    const header = parseScriptHeader(
+      "# scriptoria:title First\n# scriptoria:title Second\n# scriptoria:criticality read-only\n",
+    );
+    expect(header?.title).toBe("First");
+  });
+
+  /**
+   * The marker is a comment convention, and the spellings in the wild are not all
+   * `# key value`: no space after the hash, a doubled hash, `//` for the shell
+   * scripts that use it, and a capitalised key.
+   */
+  it("accepts the comment spellings and key cases a script may actually use", () => {
+    expect(parseScriptHeader("#scriptoria:title NoSpace\n")?.title).toBe("NoSpace");
+    expect(parseScriptHeader("## scriptoria:title Doubled\n")?.title).toBe("Doubled");
+    expect(parseScriptHeader("// scriptoria:title Slashes\n")?.title).toBe("Slashes");
+    expect(parseScriptHeader("# Scriptoria:TITLE Cased\n")?.extra).toEqual({});
+    expect(parseScriptHeader("# Scriptoria:TITLE Cased\n")?.title).toBe("Cased");
+  });
+
+  it("does not read a declaration out of something that is not a comment", () => {
+    // A script that echoes the format is not declaring anything.
+    expect(parseScriptHeader('echo "# scriptoria:title NotAComment"\n')).toBeNull();
+    expect(parseScriptHeader("grep 'scriptoria:title x' file.sh\n")).toBeNull();
+  });
+
   it("keeps unknown keys instead of dropping them", () => {
     const header = parseScriptHeader("# scriptoria:title T\n# scriptoria:owner netops@example.test\n");
     expect(header?.extra).toEqual({ owner: "netops@example.test" });
@@ -112,6 +138,33 @@ describe("parseScriptHeader", () => {
 
     expect(header?.description).toBe("First line second line");
     expect(header?.criticality).toBe("modifying");
+  });
+
+  it("joins three continuation lines with one space each, and stops at a blank one", () => {
+    const header = parseScriptHeader(
+      [
+        "# scriptoria:description one",
+        "#                     two",
+        "#                     three",
+        "",
+        "#                     too late, the block ended",
+        "# scriptoria:criticality read-only",
+      ].join("\n") + "\n",
+    );
+
+    expect(header?.description).toBe("one two three");
+    expect(header?.criticality).toBe("read-only");
+  });
+
+  it("does not treat a single space after the marker as a continuation", () => {
+    // Two spaces are the convention that distinguishes prose from a sentence
+    // somebody wrapped; one space is just a comment, and joining it would put
+    // somebody's aside into the description.
+    const single = parseScriptHeader("# scriptoria:description only\n# not joined\n");
+    expect(single?.description).toBe("only");
+
+    const doubled = parseScriptHeader("# scriptoria:description only\n#  joined\n");
+    expect(doubled?.description).toBe("only joined");
   });
 
   it("truncates an over-long title rather than losing the header with it", () => {

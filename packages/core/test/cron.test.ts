@@ -32,6 +32,14 @@ describe("nextRunAt", () => {
   it("returns null rather than throwing for an invalid expression", () => {
     expect(nextRunAt("nonsense")).toBeNull();
   });
+
+  it("takes no options at all, which is how the schedule list calls it", () => {
+    // No `from` and no timezone: both reads are optional in the signature, and a
+    // call that needs one of them would be a call the interface does not make.
+    const next = nextRunAt("0 3 * * *");
+    expect(next).toBeInstanceOf(Date);
+    expect(next?.getTime()).toBeGreaterThan(Date.now());
+  });
 });
 
 describe("scheduleId", () => {
@@ -52,6 +60,20 @@ describe("scheduleId", () => {
     // to edit one line while editing the other.
     const command = "/opt/scriptoria/scripts/inventory-report.sh";
     expect(scheduleId("src-1", command, 0)).not.toBe(scheduleId("src-1", command, 1));
+  });
+
+  it("is a fixed function of source, command and ordinal", () => {
+    // Pinned rather than compared with itself: an id that drifts when the hash
+    // is touched is a schedule the interface loses across a deployment.
+    const command = "/opt/scriptoria/scripts/inventory-report.sh";
+    expect(scheduleId("src-1", command)).toBe("f9898c98");
+    expect(scheduleId("src-1", command, 1)).toBe("fa898e2b");
+    expect(scheduleId("src-2", command)).toBe("20e27325");
+  });
+
+  it("ignores whitespace around the command, because a crontab line is not typed by hand", () => {
+    const command = "/opt/scriptoria/scripts/inventory-report.sh";
+    expect(scheduleId("src-1", `  ${command}\t`)).toBe(scheduleId("src-1", command));
   });
 
   it("still survives an edit, because an edit changes neither command nor ordinal", () => {
