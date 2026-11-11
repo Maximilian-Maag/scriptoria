@@ -408,10 +408,22 @@ export async function admitForDispatch(
     );
     if (admitted.length === 0) return [];
 
-    return tx
+    const marked = await tx
       .update(schema.runs)
       .set({ dispatchedAt: sql`now()` })
       .where(inArray(schema.runs.id, admitted))
       .returning({ id: schema.runs.id, host: schema.runs.host, queuedAt: schema.runs.queuedAt });
+
+    // RETURNING does not preserve the order of the `IN` list — it hands back rows in
+    // whatever order the update produced them, which is storage order. The caller
+    // pushes jobs in the order it is given, and the queue is FIFO, so the order here is
+    // the order runs start in: oldest first, as `chooseAdmissions` decided. Measured as
+    // a 2-in-20 test failure that swapped two ids, which is what a promise about order
+    // looks like when nothing tests it.
+    const byId = new Map(marked.map((row) => [row.id, row]));
+    return admitted.flatMap((id) => {
+      const row = byId.get(id);
+      return row ? [row] : [];
+    });
   });
 }
