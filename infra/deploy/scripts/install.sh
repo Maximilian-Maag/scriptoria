@@ -35,10 +35,18 @@ fi
 # fails with "no subuid ranges for user", which reads as a podman problem rather
 # than as an account created by a different rule. Take the first free range.
 if ! grep -q "^$user:" /etc/subuid 2> /dev/null || ! grep -q "^$user:" /etc/subgid 2> /dev/null; then
-    start=100000
-    while grep -q ":$start:" /etc/subuid /etc/subgid 2> /dev/null; do
-        start=$((start + 65536))
-    done
+    # The first free range is *after the end of the highest one in either file*, not
+    # after the highest range that happens to start on a 65536 boundary: a range with
+    # a different count (`alice:100000:100000` occupies up to 199999) overlaps a naive
+    # `start += 65536`, and two accounts sharing host uids is the isolation the
+    # subordinate range exists to provide.
+    # `|| echo 100000` for a host with no shadow subuid files at all: there is nothing
+    # to collide with, so the first range is the right answer rather than a failure
+    # under `set -e`.
+    start=$(awk -F: '
+        $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { end = $2 + $3; if (end > max) max = end }
+        END { if (max < 100000) max = 100000; print max }
+    ' /etc/subuid /etc/subgid 2> /dev/null || echo 100000)
     for file in /etc/subuid /etc/subgid; do
         grep -q "^$user:" "$file" 2> /dev/null || printf '%s:%s:65536\n' "$user" "$start" >> "$file"
     done
