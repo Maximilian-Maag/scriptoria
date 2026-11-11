@@ -303,14 +303,28 @@ export async function countQueued(): Promise<number> {
 }
 
 /**
+ * The lock dispatch holds while it decides. One key, not one per script VM.
+ *
+ * A per-host lock set cannot be taken safely: the hosts to lock are read from the
+ * queue, and a run for a host that appears *after* that read would be admitted
+ * with no lock held for it — so two processes could each see that VM idle and put
+ * a run on it. Locking what a query returned is not locking what matters. One
+ * dispatch-wide lock has no such window, and it costs what dispatch costs: four
+ * short queries, once per sweep and once per start request.
+ *
+ * The number is arbitrary and must stay stable — it is the identity two processes
+ * agree on, and renaming it is renaming a lock.
+ */
+const DISPATCH_LOCK = 4_812_013_001n;
+
+/**
  * O-7 — admit queued runs to their script VMs, oldest first, and mark them
  * dispatched in the same breath.
  *
- * The whole function is one transaction that takes an advisory lock per script VM
- * first: the count of what a VM is carrying and the mark that adds to it have to
- * be indivisible, or two processes can each see one free slot and admit a run
- * into it. Locks are taken in host order so two sweeps meeting each other cannot
- * deadlock.
+ * The whole function is one transaction holding `DISPATCH_LOCK`: what a script VM
+ * is carrying and the mark that adds to it have to be indivisible, or two
+ * processes — a start request and a sweep, or two control planes in one
+ * deployment — can each see one free slot and admit a run into it.
  *
  * Capacity is counted from the database and includes runs a worker has only
  * *started* to open a connection for, because those are on the VM too — and runs
@@ -324,15 +338,10 @@ export async function admitForDispatch(
   if (perHostLimit < 1 || batch < 1) return [];
 
   return db().transaction(async (tx) => {
-    const waiting = await tx
-      .selectDistinct({ host: schema.runs.host })
-      .from(schema.runs)
-      .where(and(eq(schema.runs.status, "queued"), isNull(schema.runs.dispatchedAt)))
-      .orderBy(asc(schema.runs.host));
-
-    for (const { host } of waiting) {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${host})::bigint)`);
-    }
+    // One lock for the whole decision — see DISPATCH_LOCK for why a per-host set
+    // is not safe. The count, the candidates and the mark below are then a
+    // snapshot that nothing else can dispatch into.
+    await tx.execute(sql`select pg_advisory_xact_lock(${DISPATCH_LOCK})`);
 
     const busy = await tx
       .select({ host: schema.runs.host, count: sql<number>`count(*)::int` })

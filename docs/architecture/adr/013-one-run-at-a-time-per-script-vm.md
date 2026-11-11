@@ -31,10 +31,13 @@ transaction that takes an advisory lock per host.**
 - A run that does not fit **waits** in `queued`. It is not refused: an operator who starts a
   second script has done nothing wrong, and a status line they can watch is a better answer than
   a rule they cannot see.
-- Admission and the dispatch mark (`runs.dispatched_at`) are written in one transaction holding
-  `pg_advisory_xact_lock(hashtext(host))`. That is what stops two control-plane processes — or a
+- Admission and the dispatch mark (`runs.dispatched_at`) are written in one transaction holding a
+  **single dispatch-wide advisory lock**. That is what stops two control-plane processes — or a
   start request and a sweep — from each believing the VM has one free slot and admitting a run
-  into it.
+  into it. One lock rather than one per script VM because a per-host set cannot be taken safely:
+  the hosts come from a query, and a run for a host created after that query would be admitted
+  with no lock held for it. Dispatch is four short queries; serialising it costs nothing that
+  matters.
 - A mark older than 90 seconds on a still-queued run is released and the run dispatched again.
   That is the recovery path for a job that never reached the queue, and the reason a mark can
   never hold a VM for ever.
