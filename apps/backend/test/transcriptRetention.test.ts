@@ -104,4 +104,48 @@ describe("pruning terminal transcripts", () => {
     const outcome = await pruneTranscripts({ days: 30, now });
     expect(outcome.cutoff?.toISOString()).toBe("2026-10-12T12:00:00.000Z");
   });
+
+});
+
+/**
+ * How much one pass gets through, which is the half of retention that a single batch
+ * could not do: at six hours apart, 250 rows a pass is 1 000 transcripts a day — a
+ * backlog that never clears and a deployment creating more that never catches up.
+ *
+ * A separate block because these count rows: the tests above start from a seeded area
+ * of their own, and adding to it would make the arithmetic here about the fixture.
+ */
+describe("draining a backlog in one pass", () => {
+  async function oldTranscripts(count: number): Promise<string[]> {
+    const area = await seedArea("Retention backlog");
+    const ids: string[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const run = await seedRun(area, "admin.branch");
+      await runRepository.saveTranscript(run.id, TRANSCRIPT, TRANSCRIPT.length, false);
+      await persistAgo(run.id, 120);
+      ids.push(run.id);
+    }
+    return ids;
+  }
+
+  it("repeats the statement until the backlog is gone", async () => {
+    const ids = await oldTranscripts(5);
+
+    const { pruneTranscripts } = await import("../src/lib/services/runRetention");
+    const outcome = await pruneTranscripts({ days: 90, batch: 2 });
+
+    expect(outcome.pruned).toBe(5);
+    for (const id of ids) expect((await transcriptOf(id))!.content).toBe("");
+  });
+
+  it("stops at the cap, so one pass over years of transcripts stays bounded", async () => {
+    await oldTranscripts(5);
+
+    const { pruneTranscripts } = await import("../src/lib/services/runRetention");
+    // One statement of two rows: the rest waits for the next pass rather than running an
+    // unbounded number of statements inside one timer callback.
+    const outcome = await pruneTranscripts({ days: 90, batch: 2, maxBatches: 1 });
+
+    expect(outcome.pruned).toBe(2);
+  });
 });
