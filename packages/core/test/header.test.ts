@@ -156,6 +156,20 @@ describe("parseScriptHeader", () => {
     expect(header?.criticality).toBe("read-only");
   });
 
+  it("continues a description under a doubled marker, which is how some people write comments", () => {
+    const header = parseScriptHeader(
+      "## scriptoria:description first\n##                   second\n",
+    );
+    expect(header?.description).toBe("first second");
+  });
+
+  it("does not treat a key with no value as a declaration", () => {
+    // `# scriptoria:title` with nothing after it declares nothing at all, which
+    // is rule 3: a malformed value is ignored, and an empty block is no block.
+    expect(parseScriptHeader("# scriptoria:title\n")).toBeNull();
+    expect(parseScriptHeader("# scriptoria:title\nset -e\n")).toBeNull();
+  });
+
   it("does not treat a single space after the marker as a continuation", () => {
     // Two spaces are the convention that distinguishes prose from a sentence
     // somebody wrapped; one space is just a comment, and joining it would put
