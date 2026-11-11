@@ -150,7 +150,7 @@ environment, here:
 
     # on the build machine: build, then one tarball — with *this environment's* terminal address,
     # because the frontend bundle has it compiled in and no runtime setting can change it
-    make deploy-images TERMINAL_WS_URL=wss://<this environment's host>/terminal
+    make deploy-images TERMINAL_WS_URL=wss://<this environment's host>
     infra/deploy/scripts/load-images.sh scriptoria-images.tar    # on each host
 
 Passing `TERMINAL_WS_URL` is not optional in anything but the dev default: `make deploy-images`
@@ -158,6 +158,10 @@ builds the frontend with `NEXT_PUBLIC_TERMINAL_WS_URL` as a **build argument**, 
 compiles it into the bundle. Build without it and the tarball's frontend is an image whose terminal
 sockets go to `ws://localhost:3001` — which a browser on that host will fail to reach, and which no
 restart repairs, because the address is in the JavaScript.
+
+Give the **host, without a path**: the client appends `/terminal` itself
+(`useTerminalStream.ts` opens `${WS_BASE}/terminal`), so an address that already ends in `/terminal`
+becomes `…/terminal/terminal` and the socket never opens.
 
 The tarball carries the three platform images and the three the data and directory instances run.
 Nothing is pulled on a provisioned host: NFR-01 puts these networks in a position where there is no
