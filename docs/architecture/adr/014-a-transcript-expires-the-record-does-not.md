@@ -57,8 +57,10 @@ the data. A deployment that has not thought about it keeps its data: `0` is a va
   bytes, and a file on the script VM is still there to be collected — this deletes nothing that
   lives outside the database.
 - A first pass on a database that accumulated transcripts before this existed applies the window
-  immediately; it does so in batches, so a large backlog takes several passes rather than one
-  statement holding a lock over the table.
+  immediately. It drains in statements of 250 rows — a short lock each — and repeats until a batch
+  comes back short, up to 10 000 rows per pass: four passes a day is 40 000 transcripts, so a
+  backlog of 50 000 clears in about a day and a half rather than in months. (One batch per pass
+  would have been 1 000 a day, which cannot clear a backlog at all.)
 - **The window has no end-to-end test, and cannot have one**: ninety days is not a test, and a
   clock stub through HTTP would prove the stub. The rule is tested as a pure function at its
   boundaries (zero, negative, one day either side), the statement against real Postgres (bytes

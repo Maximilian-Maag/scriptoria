@@ -18,19 +18,37 @@ import { runRepository } from "@scriptoria/db";
  */
 
 /**
- * How many transcripts one pass prunes.
+ * How many transcripts one statement prunes.
  *
- * A bound on the statement rather than on the backlog: the next pass continues where
- * this one stopped, oldest first, so a first run against years of transcripts is a
- * day of sweeps rather than one statement holding a lock over the table.
+ * A bound on the statement, not on the pass: a small UPDATE keeps the lock short, and
+ * the pass repeats it until it stops finding work (see MAX_BATCHES_PER_PASS).
  */
 const RETENTION_BATCH = 250;
+
+/**
+ * How many statements one pass may run before it yields.
+ *
+ * The pass repeats the batch while it keeps coming back full, so a backlog drains in
+ * one pass instead of at 250 rows per interval — which, at six hours apart, is 1 000 a
+ * day and could never have cleared a real backlog, let alone kept up with a deployment
+ * creating more than that. The cap is what keeps a first pass over years of transcripts
+ * bounded: 10 000 rows per pass, remainder next time.
+ */
+const MAX_BATCHES_PER_PASS = 40;
 
 export interface RetentionOutcome {
   /** Transcripts whose bytes were dropped in this pass. */
   pruned: number;
   /** The window used, or null when retention is off. */
   cutoff: Date | null;
+}
+
+export interface RetentionOptions {
+  days?: number;
+  batch?: number;
+  /** Statements per pass. Exposed so a test can prove the cap is honoured. */
+  maxBatches?: number;
+  now?: Date;
 }
 
 /**
@@ -40,9 +58,7 @@ export interface RetentionOutcome {
  * blip must not take the process's unhandled-rejection path. The failure is logged
  * and the next pass retries — nothing has been marked that a retry cannot finish.
  */
-export async function pruneTranscripts(
-  options: { days?: number; batch?: number; now?: Date } = {},
-): Promise<RetentionOutcome> {
+export async function pruneTranscripts(options: RetentionOptions = {}): Promise<RetentionOutcome> {
   const days = options.days ?? loadBackendConfig().TRANSCRIPT_RETENTION_DAYS;
   const { cutoff } = retentionCutoff(days, options.now ?? new Date());
 
@@ -50,11 +66,19 @@ export async function pruneTranscripts(
   // decided, and the reason this check exists rather than a default of `null`.
   if (cutoff === null) return { pruned: 0, cutoff: null };
 
+  const batch = options.batch ?? RETENTION_BATCH;
+  const maxBatches = options.maxBatches ?? MAX_BATCHES_PER_PASS;
+
   try {
-    const pruned = await runRepository.pruneTranscriptsBefore(
-      cutoff,
-      options.batch ?? RETENTION_BATCH,
-    );
+    // Drain, up to the cap. A pass that pruned exactly one batch almost certainly left
+    // more behind, and the next pass is six hours away — so the loop is what makes "the
+    // window is applied" true for a backlog rather than true for 250 rows.
+    let pruned = 0;
+    for (let pass = 0; pass < maxBatches; pass += 1) {
+      const thisBatch = await runRepository.pruneTranscriptsBefore(cutoff, batch);
+      pruned += thisBatch;
+      if (thisBatch < batch) break;
+    }
 
     if (pruned > 0) {
       // `warn` rather than `log`: the backend's services may only use warn/error
