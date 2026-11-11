@@ -1,0 +1,12 @@
+# The Terraform version CI uses, pinned for a developer's machine too.
+#
+# `.github/workflows/ci.yml` pins 1.17.1 for the deployment check; nothing in the
+# repository pinned it for anyone running `make deploy-check` locally, so the
+# checks that read the Terraform modules ran against whatever happened to be
+# installed — or, with mise, against nothing at all, because a shim with no active
+# version is an error rather than a fallback.
+#
+# One line rather than a second list: this is the only tool the Makefile invokes
+# that CI installs separately, and `make deploy-check` is the command both run.
+[tools]
+terraform = "1.17.1"
