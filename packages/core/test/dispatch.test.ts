@@ -34,6 +34,12 @@ describe("chooseAdmissions", () => {
     expect(chooseAdmissions(queued("vm-a"), new Map([["vm-a", 4]]), 1, 10)).toEqual([]);
   });
 
+  it("admits nothing when the limit or the batch is zero", () => {
+    // A misconfigured sweep (a limit of 0) must quiet the platform, not open it.
+    expect(chooseAdmissions(queued("vm-a"), new Map(), 0, 10)).toEqual([]);
+    expect(chooseAdmissions(queued("vm-a"), new Map(), 1, 0)).toEqual([]);
+  });
+
   it("stops at the batch size, so one sweep cannot dispatch an unbounded list", () => {
     expect(chooseAdmissions(queued("vm-a", "vm-b", "vm-c"), new Map(), 1, 2)).toEqual([
       "run-1",

@@ -135,6 +135,24 @@ the same command and cannot drift into disagreeing about what "lint" means.
 Concurrency is `cancel-in-progress`: a second push to the same branch makes the
 first run's answer worthless, so it stops paying for it.
 
+### What the tests would notice (not in CI)
+
+A green suite says the tests ran. It does not say they would fail if the code were wrong, and twice
+in this repository's history a test that looked decisive stayed green with the defect put back.
+
+`make mutation` answers that for `packages/core` — pure functions, no database, no browser: Stryker
+rewrites the source one change at a time and asks the suite which of those changes it notices. A
+mutant nothing notices is a case nothing tests, and it is named by file and line.
+
+It is deliberately **not** a CI job. A full run is about a minute of CPU that every pull request
+would pay for a package most pull requests do not touch, and the number means most on the pull
+request that is changing a core module. Run it there. The first run scored 75.44%, named four
+untested tables and a YAML result that could not be previewed, and `thresholds.break` in
+`packages/core/stryker.conf.json` now fails a run that falls below 85.
+
+Two files are out of scope and say so: `crontab.ts` and `scriptReference.ts`, whose tests read
+artefacts from the repository root that Stryker's sandbox does not copy.
+
 ### Two details worth knowing before you edit the workflow
 
 **`Test` is an aggregating job.** The matrix legs report one check each

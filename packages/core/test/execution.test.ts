@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  CRONTAB_READ_COMMAND,
+  CRONTAB_WRITE_COMMAND,
+  PID_DIR,
   abortCommand,
   cleanupCommand,
   executionCommand,
@@ -23,6 +26,37 @@ describe("shellQuote", () => {
 });
 
 describe("interpreterFor", () => {
+  /**
+   * Every entry in the table, because a script that is handed the wrong
+   * interpreter fails at its first line — and the failure looks like the
+   * script's fault, on a machine the operator is not sitting at.
+   */
+  it("names the interpreter for every extension it claims to know", () => {
+    const expected: Record<string, string> = {
+      py: "python3",
+      pl: "perl",
+      rb: "ruby",
+      ksh: "ksh",
+      zsh: "zsh",
+    };
+    for (const [extension, interpreter] of Object.entries(expected)) {
+      expect(interpreterFor(`collect.${extension}`)).toBe(interpreter);
+    }
+  });
+
+  it("treats a dotfile as having no extension at all", () => {
+    // A leading dot is not a separator: ".bashrc" is a name, not a "bashrc" file.
+    expect(interpreterFor(".bashrc")).toBe("bash");
+    expect(interpreterFor("notes.")).toBe("bash");
+    // Even when the suffix happens to name an interpreter: ".py" is a file
+    // called ".py", and running it with python3 is an accident.
+    expect(interpreterFor(".py")).toBe("bash");
+  });
+
+  it("is case-insensitive, because a name comes off the VM as it was written there", () => {
+    expect(interpreterFor("collect.PY")).toBe("python3");
+  });
+
   it("reads the extension, and falls back to a shell that runs both", () => {
     expect(interpreterFor("collect.py")).toBe("python3");
     expect(interpreterFor("rollout.sh")).toBe("bash");
@@ -66,6 +100,24 @@ describe("executionCommand", () => {
 
   it("starts the script in its own directory (FA-05.3)", () => {
     expect(executionCommand(base)).toContain("cd '/opt/scriptoria/scripts'");
+  });
+});
+
+describe("the commands the target answers", () => {
+  /**
+   * These two strings ARE the protocol with the script VM (ADR-001's closed
+   * vocabulary): the target matches on them, and a deployment where the runner
+   * and the target disagree sends a command that silently does nothing. Pinned
+   * as text for that reason, not because the constants need testing.
+   */
+  it("reads the crontab, and writes it from stdin", () => {
+    expect(CRONTAB_READ_COMMAND).toBe("crontab -l");
+    expect(CRONTAB_WRITE_COMMAND).toBe("crontab -");
+  });
+
+  it("keeps every run's pid file in one directory, named by the run", () => {
+    expect(PID_DIR).toBe("/tmp/.scriptoria");
+    expect(pidFilePath(RUN)).toBe("/tmp/.scriptoria/3f1b0a1e-0000-4000-8000-000000000001.pid");
   });
 });
 
