@@ -1,5 +1,10 @@
 {
   "name": "scriptoria",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Maximilian-Maag/scriptoria"
+  },
   "version": "0.1.0",
   "private": true,
   "description": "Web frontend for selecting, running, interactively driving and collecting the results of existing Linux scripts on remote service VMs.",

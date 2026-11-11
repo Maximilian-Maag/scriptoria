@@ -1,0 +1,40 @@
+# Dependency updates, opened weekly and grouped so they stay reviewable.
+#
+# The lockfile is the decision here: CI installs with `pnpm install --frozen-lockfile`, so every
+# update arrives as a manifest change plus its lockfile in one commit — which is exactly what a
+# Dependabot pull request is. Grouping keeps a week's patches to one pull request per kind instead
+# of thirty, because thirty is how updates stop being read.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+    groups:
+      development:
+        dependency-type: development
+        patterns: ["*"]
+      production:
+        dependency-type: production
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
