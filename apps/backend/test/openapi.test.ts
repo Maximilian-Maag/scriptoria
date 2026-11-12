@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openApiDocument } from "@/lib/openapi/document";
+import { openApiHtml } from "@/lib/openapi/page";
 
 /**
  * The published contract against the routes that actually exist.
@@ -145,6 +146,22 @@ describe("what the document promises about itself", () => {
       .map((o) => `${o.method.toUpperCase()} ${o.path}`);
 
     expect(missing).toEqual([]);
+  });
+
+  it("renders a reference that loads nothing from outside the deployment", () => {
+    // NFR-01: a provisioned environment has no route out. A CDN link here is a page
+    // that renders blank on every host the platform is deployed to — and nothing
+    // else notices, because the document is still valid and the HTML still parses.
+    // Measured against the running route: 87 KB, zero external URLs.
+    const html = openApiHtml();
+    expect(html.match(/https?:\/\//g) ?? []).toEqual([]);
+  });
+
+  it("links back to its own document and to its own schemas", () => {
+    const html = openApiHtml();
+    expect(html).toContain("/api/openapi.json");
+    // A page of anchors and nothing else would satisfy the check above.
+    expect(html).toMatch(/#schema-[A-Za-z]/);
   });
 
   it("guards every /admin path and leaves the public ones public", () => {
