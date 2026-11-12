@@ -40,7 +40,7 @@ workspace "Scriptoria" "Web frontend for selecting, running, interactively drivi
                 api_schedules = component "Schedule Routes" "Recurring jobs and their schedules."
                 api_audit = component "Audit Routes" "The filterable audit log. Root only."
                 api_docs = component "OpenAPI Document" "Generated from the same schemas the routes validate with. Rendered server-side; no CDN, because NFR-01 has no route out."
-                api_health = component "Health & Metrics" "Liveness, readiness and metrics (NFR-16)."
+                api_health = component "Health & Readiness" "Liveness and readiness, with the dependency checks behind them — the one endpoint the external monitor polls, published by the proxy as /healthz. NFR-16 puts monitoring and alerting outside the platform, so this publishes no metrics of its own."
 
                 svc_auth = component "Auth Service" "Simple bind with the caller's own credentials."
                 svc_authz = component "Authorization Service" "Rebuilds the area set from the directory at every login (NFR-03)."
