@@ -29,10 +29,10 @@
     "eslint": "^10.14.0",
     "eslint-config-prettier": "^9.1.0",
     "pdf-lib": "^1.17.1",
-    "prettier": "^3.4.2",
+    "prettier": "^3.9.10",
     "tsx": "^4.23.15",
     "typescript": "^5.7.3",
-    "typescript-eslint": "^8.19.1",
+    "typescript-eslint": "^8.72.1",
     "vitest": "^2.1.8"
   }
 }
