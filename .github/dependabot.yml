@@ -1,9 +1,16 @@
-# Dependency updates, opened weekly and grouped so they stay reviewable.
+# Dependency updates, opened weekly.
 #
 # The lockfile is the decision here: CI installs with `pnpm install --frozen-lockfile`, so every
 # update arrives as a manifest change plus its lockfile in one commit — which is exactly what a
-# Dependabot pull request is. Grouping keeps a week's patches to one pull request per kind instead
-# of thirty, because thirty is how updates stop being read.
+# Dependabot pull request is.
+#
+# **The groups hold minor and patch updates only.** Grouping by dependency *type* looked tidier and
+# was wrong: the first run produced three pull requests that between them carried
+# `typescript 5 → 7`, `next 15 → 16`, `zod 3 → 4`, `vitest 2 → 5`, `eslint 9 → 10` and five major
+# GitHub Actions. A group is atomic in review — the riskiest member decides whether the safe ones
+# land — so one major in a group of patches means none of the patches merge. Majors are therefore
+# left ungrouped: they arrive one per pull request, and each is taken on its own with CI as the gate
+# and its changelog read before it is merged.
 version: 2
 
 updates:
@@ -18,11 +25,13 @@ updates:
     commit-message:
       prefix: chore
     groups:
-      development:
+      development-minor-and-patch:
         dependency-type: development
+        update-types: ["minor", "patch"]
         patterns: ["*"]
-      production:
+      production-minor-and-patch:
         dependency-type: production
+        update-types: ["minor", "patch"]
         patterns: ["*"]
 
   - package-ecosystem: github-actions
@@ -36,5 +45,6 @@ updates:
     commit-message:
       prefix: ci
     groups:
-      actions:
+      actions-minor-and-patch:
+        update-types: ["minor", "patch"]
         patterns: ["*"]
