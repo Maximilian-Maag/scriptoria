@@ -15,9 +15,9 @@
   },
   "dependencies": {
     "@scriptoria/contracts": "workspace:*",
-    "cron-parser": "^4.9.0",
-    "cronstrue": "^2.52.0",
-    "zod": "^3.24.1"
+    "cron-parser": "^5.10.4",
+    "cronstrue": "^3.38.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^10.1.1",
