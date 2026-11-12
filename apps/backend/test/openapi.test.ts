@@ -154,7 +154,17 @@ describe("what the document promises about itself", () => {
     // else notices, because the document is still valid and the HTML still parses.
     // Measured against the running route: 87 KB, zero external URLs.
     const html = openApiHtml();
-    expect(html.match(/https?:\/\//g) ?? []).toEqual([]);
+
+    // Any absolute URL in the text, the styles or a script string.
+    expect(html.match(/https?:\/\//gi) ?? []).toEqual([]);
+
+    // And the form that survives the check above: a protocol-relative URL in an
+    // attribute, `<script src="//cdn.example.test/x.js">`, which the browser loads
+    // from wherever the page came from — an empty scheme, not a relative path.
+    const resourceUrls = [...html.matchAll(/(?:src|href|action)\s*=\s*"([^"]*)"/gi)].map(
+      (match) => match[1] ?? "",
+    );
+    expect(resourceUrls.filter((url) => /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(url))).toEqual([]);
   });
 
   it("links back to its own document and to its own schemas", () => {
