@@ -33,7 +33,7 @@
     "@types/archiver": "^6.0.3",
     "@types/react": "^19.0.4",
     "@types/ws": "^8.18.2",
-    "openapi3-ts": "^4.6.1",
+    "openapi3-ts": "^4.6.2",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
   }
