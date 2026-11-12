@@ -16,7 +16,7 @@
   "dependencies": {
     "@scriptoria/contracts": "workspace:*",
     "cron-parser": "^4.9.0",
-    "cronstrue": "^2.52.0",
+    "cronstrue": "^3.38.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
