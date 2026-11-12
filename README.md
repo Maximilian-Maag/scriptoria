@@ -412,3 +412,13 @@ request. After cloning, enable the hook once:
 
 Documented exceptions belong in `policy.json` under `allow`, each with a reason —
 an exception you can read is a decision; a check nobody runs is decoration.
+
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the commands to run before a pull request, the branch
+ladder and commit conventions, and what "verified" means here. Vulnerabilities go through
+[`SECURITY.md`](SECURITY.md), never a public issue.
+
+## Licence
+
+Apache License 2.0 — see [`LICENSE`](LICENSE).
