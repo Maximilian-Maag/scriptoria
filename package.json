@@ -24,7 +24,7 @@
     "test:e2e": "pnpm --filter e2e test"
   },
   "devDependencies": {
-    "@eslint/js": "^9.17.0",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.5",
     "eslint": "^10.14.0",
     "eslint-config-prettier": "^9.1.0",
